@@ -4,32 +4,129 @@
 #include <QBrush>
 #include <QPen>
 #include <QDebug>
+#include <QtMath>
+#include <QImageReader>
 
 // ============================================================================
-//  Projectile 流星粒子（一技能）
+//  静态帧缓存：所有 Projectile 共用，启动时只加载一次
+// ============================================================================
+
+namespace {
+    QVector<QVector<QPixmap>> g_projectileFrames; // [8 directions][frame index]
+    bool g_framesLoaded = false;
+
+    void doLoadProjectileFrames()
+    {
+        if (g_framesLoaded) return;
+        g_framesLoaded = true;
+
+        auto extractFrames = [](const QString &path) -> QVector<QPixmap> {
+            QVector<QPixmap> result;
+            QImageReader reader(path);
+            reader.setAutoDetectImageFormat(true);
+            while (reader.canRead()) {
+                QImage img = reader.read();
+                if (!img.isNull()) {
+                    result.append(QPixmap::fromImage(img));
+                }
+            }
+            if (result.isEmpty()) {
+                qDebug() << "Failed to extract frames from:" << path;
+            }
+            return result;
+        };
+
+        QVector<QPixmap> rightFrames = extractFrames(":/images/fly_fire_right.gif");
+        QVector<QPixmap> diagFrames  = extractFrames(":/images/fly_fire_left_down.gif");
+
+        if (rightFrames.isEmpty() && diagFrames.isEmpty()) return;
+
+        g_projectileFrames.resize(8);
+
+        struct DirInfo {
+            const QVector<QPixmap> *source;
+            QTransform transform;
+        };
+        DirInfo dirInfos[8] = {
+            { &rightFrames, QTransform() },                              // 0: 右
+            { &diagFrames,  QTransform().rotate(180) },                  // 1: 右上
+            { &rightFrames, QTransform().rotate(90) },                   // 2: 下
+            { &diagFrames,  QTransform::fromScale(-1, 1) },              // 3: 右下
+            { &rightFrames, QTransform::fromScale(-1, 1) },              // 4: 左
+            { &diagFrames,  QTransform() },                              // 5: 左下
+            { &rightFrames, QTransform().rotate(-90) },                  // 6: 上
+            { &diagFrames,  QTransform::fromScale(1, -1) },              // 7: 左上
+        };
+
+        for (int d = 0; d < 8; ++d) {
+            if (!dirInfos[d].source) continue;
+            for (const QPixmap &src : *dirInfos[d].source) {
+                if (dirInfos[d].transform.isIdentity()) {
+                    g_projectileFrames[d].append(src);
+                } else {
+                    g_projectileFrames[d].append(
+                        src.transformed(dirInfos[d].transform, Qt::SmoothTransformation));
+                }
+            }
+        }
+    }
+
+    inline const QVector<QPixmap>& framesForDir(int dir)
+    {
+        static QVector<QPixmap> empty;
+        if (dir < 0 || dir >= g_projectileFrames.size()) return empty;
+        return g_projectileFrames[dir];
+    }
+}
+
+void preloadProjectileFrames()
+{
+    doLoadProjectileFrames();
+}
+
+// ============================================================================
+//  Projectile 火炮投射物（一技能）
 // ============================================================================
 
 Projectile::Projectile(QPointF startPos, QPointF velocity, int damage,
-                       bool decay, TileMap *tileMap, QGraphicsScene *scene,
+                       TileMap *tileMap, QGraphicsScene *scene,
                        QGraphicsItem *parent)
-    : QGraphicsEllipseItem(parent),
+    : QGraphicsPixmapItem(parent),
       velocity(velocity),
       damage(damage),
-      decay(decay),
       tileMap(tileMap),
       m_scene(scene),
-      lifetime(decay ? 60 : -1),
-      initialRadius(6.0)
+      distanceTraveled(0.0),
+      maxDistance(400.0),
+      dirIndex(0),
+      frameIndex(0),
+      frameTick(0)
 {
-    // 设置流星粒子的形状：圆形
-    setRect(-initialRadius, -initialRadius, initialRadius * 2, initialRadius * 2);
+    // 预加载帧缓存（首次构造时执行一次）
+    doLoadProjectileFrames();
+
+    // 根据速度方向计算 8 方向索引
+    qreal angle = qAtan2(velocity.y(), velocity.x()) * 180.0 / M_PI;
+    if (angle < 0) angle += 360;
+    dirIndex = qRound(angle / 45.0) % 8;
+
+    // 设置第一帧
+    const QVector<QPixmap> &frames = framesForDir(dirIndex);
+    if (!frames.isEmpty()) {
+        setPixmap(frames[0]);
+    }
+
     setPos(startPos);
+    setTransformationMode(Qt::SmoothTransformation);
 
-    // 流星颜色：金色填充 + 红橙色发光边框
-    setBrush(QBrush(QColor(255, 215, 0)));
-    setPen(QPen(QColor(255, 100, 0), 2));
+    // 缩放到 40x40 显示
+    QSize origSize = pixmap().size();
+    if (!origSize.isEmpty()) {
+        qreal sx = 40.0 / origSize.width();
+        qreal sy = 40.0 / origSize.height();
+        setTransform(QTransform::fromScale(sx, sy));
+    }
 
-    // 自动加入场景
     if (scene) {
         scene->addItem(this);
     }
@@ -37,57 +134,48 @@ Projectile::Projectile(QPointF startPos, QPointF velocity, int damage,
 
 Projectile::~Projectile()
 {
-    // QGraphicsItem 的析构会自动从场景中移除自己，无需手动 removeItem
+    // 不再持有 QMovie，无需清理
 }
 
 bool Projectile::update()
 {
-    // ========== 1. 移动 ==========
-    setPos(pos() + velocity);
+    // ---- 移动 ----
+    QPointF oldPos = pos();
+    setPos(oldPos + velocity);
+    distanceTraveled += QLineF(oldPos, pos()).length();
 
-    // ========== 2. 墙壁碰撞检测 ==========
-    if (tileMap && tileMap->collidesWithWall(this)) {
-        return false; // 撞墙 -> 死亡
+    // ---- 动画帧切换（每 2 个游戏帧切一帧，约 30fps）----
+    frameTick++;
+    if (frameTick >= 2) {
+        frameTick = 0;
+        const QVector<QPixmap> &frames = framesForDir(dirIndex);
+        if (!frames.isEmpty()) {
+            frameIndex = (frameIndex + 1) % frames.size();
+            setPixmap(frames[frameIndex]);
+        }
     }
 
-    // ========== 3. 场景边界检测 ==========
+    // ---- 生命周期检测 ----
+    if (distanceTraveled >= maxDistance) {
+        return false;
+    }
+
+    if (tileMap && tileMap->collidesWithWall(this)) {
+        return false;
+    }
+
     if (m_scene) {
         QRectF sceneRect = m_scene->sceneRect();
         if (!sceneRect.contains(pos())) {
-            return false; // 飞出场景 -> 死亡
+            return false;
         }
     }
 
-    // ========== 4. 衰减处理 ==========
-    if (decay && lifetime > 0) {
-        lifetime--;
-        if (lifetime <= 0) {
-            return false; // 寿命耗尽 -> 死亡
-        }
-
-        // 半径逐渐缩小
-        qreal ratio = static_cast<qreal>(lifetime) / 60.0;
-        qreal r = initialRadius * ratio;
-        if (r < 0.5) {
-            r = 0.5;
-        }
-        setRect(-r, -r, r * 2, r * 2);
-
-        // 颜色渐变：金色 -> 暗橙 -> 接近透明
-        int red   = 255;
-        int green = static_cast<int>(180 * ratio);
-        int blue  = static_cast<int>(50 * ratio);
-        int alpha = static_cast<qreal>(200 * ratio + 55);
-
-        setBrush(QBrush(QColor(red, green, blue, alpha)));
-        setPen(QPen(QColor(255, 80, 0, alpha), 2));
-    }
-
-    return true; // 仍然存活
+    return true;
 }
 
 // ============================================================================
-//  BladeWave 刀浪（二技能）
+//  二技能：刀浪（Blade Wave）
 // ============================================================================
 
 BladeWave::BladeWave(QPointF startPos, QPointF velocity, int damage,
@@ -101,32 +189,26 @@ BladeWave::BladeWave(QPointF startPos, QPointF velocity, int damage,
       maxDistance(400),
       distanceTraveled(0.0)
 {
-    // 刀浪形状：根据飞行方向设置长条形矩形（长度 80，宽度 16）
-    // 矩形从 startPos 向飞行方向延伸
     qreal vx = velocity.x();
     qreal vy = velocity.y();
     if (qAbs(vx) >= qAbs(vy)) {
-        // 水平方向为主
         if (vx >= 0) {
-            setRect(0, -8, 80, 16);    // 向右：从原点向右延伸
+            setRect(0, -8, 80, 16);
         } else {
-            setRect(-80, -8, 80, 16);  // 向左：从原点向左延伸
+            setRect(-80, -8, 80, 16);
         }
     } else {
-        // 垂直方向为主
         if (vy >= 0) {
-            setRect(-8, 0, 16, 80);    // 向下：从原点向下延伸
+            setRect(-8, 0, 16, 80);
         } else {
-            setRect(-8, -80, 16, 80);  // 向上：从原点向上延伸
+            setRect(-8, -80, 16, 80);
         }
     }
     setPos(startPos);
 
-    // 刀浪颜色：青蓝色填充 + 银白色发光边框（炫酷感）
     setBrush(QBrush(QColor(0, 200, 255, 200)));
     setPen(QPen(QColor(200, 240, 255, 230), 2));
 
-    // 自动加入场景
     if (scene) {
         scene->addItem(this);
     }
@@ -134,33 +216,28 @@ BladeWave::BladeWave(QPointF startPos, QPointF velocity, int damage,
 
 BladeWave::~BladeWave()
 {
-    // QGraphicsItem 的析构会自动从场景中移除自己
 }
 
 bool BladeWave::update()
 {
-    // ========== 1. 移动 ==========
     QPointF oldPos = pos();
     setPos(oldPos + velocity);
 
-    // 累计飞行距离
     distanceTraveled += QLineF(oldPos, pos()).length();
     if (distanceTraveled >= maxDistance) {
-        return false; // 达到最大飞行距离 -> 死亡
+        return false;
     }
 
-    // ========== 2. 墙壁碰撞检测 ==========
     if (tileMap && tileMap->collidesWithWall(this)) {
-        return false; // 撞墙 -> 死亡
+        return false;
     }
 
-    // ========== 3. 场景边界检测 ==========
     if (m_scene) {
         QRectF sceneRect = m_scene->sceneRect();
         if (!sceneRect.contains(pos())) {
-            return false; // 飞出场景 -> 死亡
+            return false;
         }
     }
 
-    return true; // 仍然存活
+    return true;
 }

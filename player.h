@@ -15,6 +15,8 @@ public:
     ~Player();
 
     void move(bool up, bool down, bool left, bool right);
+    /** 碰撞判定框：显示 64×64，但只取右下角 32×32 做墙碰撞 */
+    QRectF hitboxRect() const { return QRectF(x() + 32, y() + 32, 32, 32); }
 
     // ========== 血量蓝量系统 ==========
     int getHp() const { return hp; }
@@ -25,6 +27,18 @@ public:
     void takeDamage(int dmg);
     bool consumeMp(int cost);
     void recoverHpMp(int hpAmount, int mpAmount);
+
+    // ========== 经验等级系统 ==========
+    void addExp(int amount);
+    int getExp() const { return exp; }
+    int getMaxExp() const { return maxExp; }
+    int getLevel() const { return level; }
+
+    // ========== 形态切换 ==========
+    void setEnhanced(bool enhanced);
+
+signals:
+    void levelUp(int newLevel);
 
 private slots:
     void onFrameChanged(int frame);
@@ -38,6 +52,18 @@ private:
     int maxHp = 100;
     int mp = 100;
     int maxMp = 100;
+
+    int exp = 0;
+    int maxExp = 100;
+    int level = 1;
+
+    // 动画状态
+    bool facingRight = true;   // 当前朝向
+    bool isRunning = false;    // 是否在跑动
+    bool isEnhanced = false;   // 是否增强形态（10级）
+    QString currentGifPath;    // 当前播放的 GIF 路径
+
+    void updateAnimationState(bool moving, bool right);
 };
 
 #endif // PLAYER_H

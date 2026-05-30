@@ -56,7 +56,7 @@ class Enemy : public QObject, public QGraphicsPixmapItem
 {
     Q_OBJECT
 public:
-    Enemy(TileMap *tileMap, QGraphicsScene *scene, QPointF startPos, Game *game);
+    Enemy(TileMap *tileMap, QGraphicsScene *scene, QPointF startPos, Game *game, int initialHp = 50);
     ~Enemy();
 
     /** 每帧更新（移动、攻击计时） */
@@ -64,6 +64,8 @@ public:
 
     /** 受到伤害（预留接口） */
     void takeDamage(int dmg);
+
+    void setAttackInterval(int interval) { attackInterval = interval; }
 
     int getHp() const { return hp; }
     bool isDead() const { return dead; }

@@ -92,3 +92,12 @@ bool TileMap::collidesWithWall(QGraphicsItem *item) const
     }
     return false;
 }
+
+bool TileMap::collidesWithWall(const QRectF &rect) const
+{
+    for (Tile *wall : walls) {
+        if (wall->sceneBoundingRect().intersects(rect))
+            return true;
+    }
+    return false;
+}

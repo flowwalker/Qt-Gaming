@@ -16,6 +16,7 @@ class TileMap;
 class Projectile;
 class Enemy;
 class EnemyProjectile;
+class Spawner;
 
 class Game : public QGraphicsView
 {
@@ -30,6 +31,10 @@ public:
 
     /** 敌人注册的炮弹加入游戏管理列表 */
     void addEnemyProjectile(EnemyProjectile *ep);
+    /** 巢穴生成的敌人加入游戏管理列表 */
+    void addEnemy(Enemy *e);
+    /** 获取当前场上敌人数量 */
+    int getEnemyCount() const { return enemies.size(); }
 
 private slots:
     void updateGame();
@@ -56,15 +61,32 @@ private:
     static constexpr qreal MAX_ZOOM = 4.0;
     void applyZoom();
 
+    // 闪现动画状态
+    struct FlashState {
+        bool active = false;
+        QPointF step;       // 每帧移动量
+        int framesLeft = 0; // 剩余帧数
+        QPointF finalPos;   // 最终目标位置
+        QPointF bladeDir;   // 刀浪方向（闪现结束时发射）
+    };
+    FlashState flashState;
+
     // ========== HUD 血蓝条 ==========
     QGraphicsRectItem *hudHpBg = nullptr;
     QGraphicsRectItem *hudHpFg = nullptr;
     QGraphicsRectItem *hudMpBg = nullptr;
     QGraphicsRectItem *hudMpFg = nullptr;
+    QGraphicsRectItem *hudExpBg = nullptr;
+    QGraphicsRectItem *hudExpFg = nullptr;
     QGraphicsSimpleTextItem *hudText = nullptr;
+    QGraphicsSimpleTextItem *hudLevelText = nullptr;
 
     void createHud();
     void updateHud();
+
+    // ========== 经验等级系统 ==========
+    void onPlayerLevelUp(int newLevel);
+    void applyLevel10Enhancement();
 
     // ========== 技能系统 ==========
     /** 当前场景中所有活跃的流星粒子 */
@@ -78,6 +100,8 @@ private:
     void skillMeteorBurst();
     /** 每帧更新所有流星粒子（移动、碰撞、清理） */
     void updateProjectiles();
+    /** 在指定位置创建爆炸动画（3x3 tile 大小） */
+    void createExplosion(QPointF centerPos);
 
     /** 技能二：闪现刀浪（按 K 键触发） */
     void skillFlashBlade();
@@ -106,6 +130,12 @@ private:
     void updateEnemies();
     /** 每帧更新所有敌人炮弹（移动、碰撞、清理） */
     void updateEnemyProjectiles();
+
+    // ========== 巢穴系统 ==========
+    QVector<Spawner*> spawners;             // 所有活跃巢穴
+
+    /** 每帧更新所有巢穴 */
+    void updateSpawners();
 };
 
 #endif // GAME_H

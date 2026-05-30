@@ -8,16 +8,12 @@
 Player::Player(TileMap *map, QGraphicsItem *parent)
     : QGraphicsPixmapItem(parent), tileMap(map), speed(4.0), movie(nullptr)
 {
-    // 尝试加载 GIF 动画（保留原始分辨率，用 transform 缩放到 32x32）
+    // 加载 idle GIF
     movie = new QMovie(":/images/player.gif");
     if (movie->isValid()) {
         connect(movie, &QMovie::frameChanged, this, &Player::onFrameChanged);
         movie->start();
-
-        QSize origSize = movie->currentPixmap().size();
-        qreal sx = 32.0 / origSize.width();
-        qreal sy = 32.0 / origSize.height();
-        setTransform(QTransform::fromScale(sx, sy));
+        currentGifPath = ":/images/player.gif";
     } else {
         qDebug() << "Failed to load player.gif, falling back to static image.";
         delete movie;
@@ -30,8 +26,9 @@ Player::Player(TileMap *map, QGraphicsItem *parent)
             pixmap.fill(Qt::blue);
         }
         setPixmap(pixmap);
-        qreal sx = 32.0 / pixmap.width();
-        qreal sy = 32.0 / pixmap.height();
+        QSize origSize = pixmap.size();
+        qreal sx = 64.0 / origSize.width();
+        qreal sy = 64.0 / origSize.height();
         setTransform(QTransform::fromScale(sx, sy));
     }
     setShapeMode(QGraphicsPixmapItem::BoundingRectShape);
@@ -50,9 +47,98 @@ Player::~Player()
 void Player::onFrameChanged(int frame)
 {
     Q_UNUSED(frame);
-    if (movie) {
-        setPixmap(movie->currentPixmap());
+    if (!movie) return;
+
+    QPixmap framePixmap = movie->currentPixmap();
+    if (framePixmap.isNull()) return;
+
+    // 朝左时水平翻转
+    if (!facingRight) {
+        framePixmap = framePixmap.transformed(QTransform::fromScale(-1, 1));
     }
+
+    setPixmap(framePixmap);
+
+    // 保持 64x64 的显示大小
+    QSize origSize = framePixmap.size();
+    qreal sx = 64.0 / origSize.width();
+    qreal sy = 64.0 / origSize.height();
+    setTransform(QTransform::fromScale(sx, sy));
+}
+
+void Player::updateAnimationState(bool moving, bool right)
+{
+    facingRight = right;
+
+    // 如果移动状态没变且朝向没变，无需切换
+    if (isRunning == moving && facingRight == right && !currentGifPath.isEmpty()) {
+        // 但形态可能变了，需要检查
+        QString expectedPath;
+        if (moving) {
+            expectedPath = isEnhanced ? ":/images/player_enhanced_right_run.gif"
+                                      : ":/images/player_run.gif";
+        } else {
+            expectedPath = isEnhanced ? ":/images/player_enhanced.gif"
+                                      : ":/images/player.gif";
+        }
+        if (currentGifPath == expectedPath) return;
+    }
+
+    isRunning = moving;
+
+    QString targetPath;
+    if (moving) {
+        targetPath = isEnhanced ? ":/images/player_enhanced_right_run.gif"
+                                : ":/images/player_run.gif";
+    } else {
+        targetPath = isEnhanced ? ":/images/player_enhanced.gif"
+                                : ":/images/player.gif";
+    }
+
+    if (currentGifPath != targetPath && movie) {
+        currentGifPath = targetPath;
+        movie->stop();
+        movie->setFileName(targetPath);
+        movie->start();
+    }
+}
+
+void Player::setEnhanced(bool enhanced)
+{
+    if (isEnhanced == enhanced) return;
+    isEnhanced = enhanced;
+
+    // 强制刷新动画
+    currentGifPath.clear();
+    updateAnimationState(isRunning, facingRight);
+
+    qDebug() << "Player enhanced mode:" << (enhanced ? "ON" : "OFF");
+}
+
+void Player::move(bool up, bool down, bool left, bool right)
+{
+    qreal dx = 0, dy = 0;
+    if (left)  dx = -speed;
+    if (right) dx =  speed;
+    if (up)    dy = -speed;
+    if (down)  dy =  speed;
+
+    // 更新朝向（只有水平移动才改变朝向，静止时保持原朝向）
+    if (dx > 0) facingRight = true;
+    else if (dx < 0) facingRight = false;
+
+    bool moving = (dx != 0 || dy != 0);
+    updateAnimationState(moving, facingRight);
+
+    if (dx == 0 && dy == 0) return;
+
+    setPos(x() + dx, y());
+    if (tileMap->collidesWithWall(hitboxRect()))
+        setPos(x() - dx, y());
+
+    setPos(x(), y() + dy);
+    if (tileMap->collidesWithWall(hitboxRect()))
+        setPos(x(), y() - dy);
 }
 
 void Player::takeDamage(int dmg)
@@ -81,21 +167,23 @@ void Player::recoverHpMp(int hpAmount, int mpAmount)
     if (mp > maxMp) mp = maxMp;
 }
 
-void Player::move(bool up, bool down, bool left, bool right)
+void Player::addExp(int amount)
 {
-    qreal dx = 0, dy = 0;
-    if (left)  dx = -speed;
-    if (right) dx =  speed;
-    if (up)    dy = -speed;
-    if (down)  dy =  speed;
-
-    if (dx == 0 && dy == 0) return;
-
-    setPos(x() + dx, y());
-    if (tileMap->collidesWithWall(this))
-        setPos(x() - dx, y());
-
-    setPos(x(), y() + dy);
-    if (tileMap->collidesWithWall(this))
-        setPos(x(), y() - dy);
+    if (level >= 20) return; // 最高 20 级
+    exp += amount;
+    while (exp >= maxExp && level < 20) {
+        exp -= maxExp;
+        level++;
+        maxExp = static_cast<int>(maxExp * 1.2);
+        // 升级回满 HP/MP，且上限提升 1.5 倍
+        maxHp = static_cast<int>(maxHp * 1.5);
+        maxMp = static_cast<int>(maxMp * 1.5);
+        hp = maxHp;
+        mp = maxMp;
+        emit levelUp(level);
+        qDebug() << "Level up! New level:" << level
+                 << "HP:" << hp << "/" << maxHp
+                 << "MP:" << mp << "/" << maxMp
+                 << "Next EXP:" << maxExp;
+    }
 }

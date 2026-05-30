@@ -59,7 +59,7 @@ bool EnemyProjectile::update(TileMap *tileMap)
 //  Enemy 怪物
 // ============================================================================
 
-Enemy::Enemy(TileMap *tileMap, QGraphicsScene *scene, QPointF startPos, Game *game)
+Enemy::Enemy(TileMap *tileMap, QGraphicsScene *scene, QPointF startPos, Game *game, int initialHp)
     : QGraphicsPixmapItem(),
       tileMap(tileMap),
       m_scene(scene),
@@ -69,8 +69,8 @@ Enemy::Enemy(TileMap *tileMap, QGraphicsScene *scene, QPointF startPos, Game *ga
       moveInterval(60),   // 每 60 帧（约 1 秒）换一次方向
       attackCounter(0),
       attackInterval(120), // 每 120 帧（约 2 秒）攻击一次
-      hp(50),
-      maxHp(50),
+      hp(initialHp),
+      maxHp(initialHp),
       dead(false)
 {
     // 加载怪物贴图（保留原始分辨率，用 transform 缩放到 32x32）

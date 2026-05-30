@@ -1,6 +1,7 @@
 #include "game.h"
 #include "player.h"
 #include "tilemap.h"
+#include "spawner.h"
 #include <QDebug>
 #include <QGraphicsRectItem>
 #include <QFile>
@@ -9,6 +10,35 @@
 #include <QJsonArray>
 #include <QFileInfo>
 #include <QtMath>  // qSqrt
+#include <QImageReader>
+
+namespace {
+    QVector<QPixmap> g_bombFrames;
+    bool g_bombLoaded = false;
+
+    void loadBombFrames()
+    {
+        if (g_bombLoaded) return;
+        g_bombLoaded = true;
+        QImageReader reader(":/images/bomb.gif");
+        reader.setAutoDetectImageFormat(true);
+        int count = 0;
+        while (reader.canRead()) {
+            QImage img = reader.read();
+            if (!img.isNull()) {
+                // 每 2 帧取 1 帧，减少总帧数
+                if (count % 2 == 0) {
+                    g_bombFrames.append(QPixmap::fromImage(img).scaled(
+                        96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                }
+                count++;
+            }
+        }
+        if (g_bombFrames.isEmpty()) {
+            qDebug() << "Failed to load bomb.gif frames";
+        }
+    }
+}
 
 Game::Game(QWidget *parent)
     : QGraphicsView(parent),
@@ -20,6 +50,10 @@ Game::Game(QWidget *parent)
     setFixedSize(800, 600);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    // 预加载 Projectile / Bomb 帧缓存，避免首次释放技能时卡顿
+    preloadProjectileFrames();
+    loadBombFrames();
 
     // 加载初始地图（使用 start 点）
     loadMap(":/maps/school_map.tmj", true);
@@ -58,12 +92,19 @@ Game::~Game()
     }
     enemyProjectiles.clear();
 
+    // 清理所有巢穴
+    for (Spawner *s : spawners) {
+        delete s;
+    }
+    spawners.clear();
+
     // 清理 HUD
     if (hudHpBg) { delete hudHpBg; hudHpBg = nullptr; }
     if (hudHpFg) { delete hudHpFg; hudHpFg = nullptr; }
     if (hudMpBg) { delete hudMpBg; hudMpBg = nullptr; }
     if (hudMpFg) { delete hudMpFg; hudMpFg = nullptr; }
     if (hudText) { delete hudText; hudText = nullptr; }
+    if (hudLevelText) { delete hudLevelText; hudLevelText = nullptr; }
 
     delete tileMap;
     delete player;
@@ -112,6 +153,12 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
         delete ep;
     }
     enemyProjectiles.clear();
+
+    // 清理所有巢穴
+    for (Spawner *s : spawners) {
+        delete s;
+    }
+    spawners.clear();
 
     // 清理 HUD
     if (hudHpBg) { delete hudHpBg; hudHpBg = nullptr; }
@@ -236,14 +283,15 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     player = new Player(tileMap);
     scene->addItem(player);
 
-    // 创建敌人（在地图中放置几个测试敌人）
-    enemies.append(new Enemy(tileMap, scene, QPointF(400, 300), this));
-    enemies.append(new Enemy(tileMap, scene, QPointF(700, 400), this));
-    enemies.append(new Enemy(tileMap, scene, QPointF(500, 600), this));
-    // 将敌人加入可攻击列表（技能可以击中敌人）
-    for (Enemy *e : enemies) {
-        hittableItems.append(e);
-    }
+    // 创建巢穴（基于玩家出生点偏移，任何地图都合理）
+    QPointF spawnBase = tileMap->getPlayerStart();
+    if (spawnBase.isNull()) spawnBase = QPointF(100, 100);
+    spawners.append(new Spawner(tileMap, scene, spawnBase + QPointF(300, 100), this));
+    spawners.append(new Spawner(tileMap, scene, spawnBase + QPointF(-100, 300), this));
+    spawners.append(new Spawner(tileMap, scene, spawnBase + QPointF(-200, -100), this));
+
+    // 连接玩家升级信号
+    connect(player, &Player::levelUp, this, &Game::onPlayerLevelUp);
 
     // 根据 useStartPoint 决定初始位置
     if (useStartPoint) {
@@ -323,15 +371,44 @@ void Game::keyReleaseEvent(QKeyEvent *event)
 
 void Game::updateGame()
 {
-    // 仅在玩家存在时移动（防止空指针）
-    if (player) {
+    // ========== 闪现动画（优先处理）==========
+    if (flashState.active && player) {
+        player->setPos(player->pos() + flashState.step);
+        flashState.framesLeft--;
+
+        // 每帧生成一个红色残影
+        QGraphicsEllipseItem *dot = new QGraphicsEllipseItem(-4, -4, 8, 8);
+        dot->setPos(player->sceneBoundingRect().center());
+        dot->setBrush(QBrush(QColor(255, 50, 50, 200)));
+        dot->setPen(Qt::NoPen);
+        scene->addItem(dot);
+        QTimer::singleShot(200, [dot]() { delete dot; });
+
+        if (flashState.framesLeft <= 0) {
+            // 闪现结束，校正到最终位置
+            flashState.active = false;
+            player->setPos(flashState.finalPos);
+
+            // 射出刀浪
+            qreal bladeSpeed = 12.0;
+            int damage = 40;
+            QPointF bladeStart = player->sceneBoundingRect().center()
+                                 + QPointF(flashState.bladeDir.x() * 20.0, flashState.bladeDir.y() * 20.0);
+            QPointF bladeVelocity(flashState.bladeDir.x() * bladeSpeed, flashState.bladeDir.y() * bladeSpeed);
+            BladeWave *bw = new BladeWave(bladeStart, bladeVelocity, damage, tileMap, scene);
+            bladeWaves.append(bw);
+        }
+        centerOn(player);
+    }
+    // 正常移动
+    else if (player) {
         player->move(upPressed, downPressed, leftPressed, rightPressed);
         centerOn(player);
     }
 
-    // 每 60 帧（约 1 秒）恢复 1 HP 和 1 MP
+    // 每 20 帧（约 0.33 秒）恢复 1 HP 和 1 MP，速度为原来的 3 倍
     regenCounter++;
-    if (regenCounter >= 60) {
+    if (regenCounter >= 20) {
         regenCounter = 0;
         if (player) {
             player->recoverHpMp(1, 1);
@@ -343,6 +420,7 @@ void Game::updateGame()
     updateShieldPosition();    // ← 更新盾牌跟随玩家
     updateEnemies();           // ← 更新所有敌人
     updateEnemyProjectiles();  // ← 更新所有敌人炮弹
+    updateSpawners();          // ← 更新所有巢穴
     updateHud();               // ← 更新 HUD 位置和数值
     checkPortal();
 }
@@ -352,7 +430,7 @@ void Game::checkPortal()
     if (!canTeleport || isTeleporting) return;
     if (!player || !tileMap) return; // 安全检查
 
-    QRectF playerRect = player->sceneBoundingRect();
+    QRectF playerRect = player->hitboxRect();
     for (const Portal &portal : tileMap->getPortals()) {
         if (playerRect.intersects(portal.rect)) {
             canTeleport = false;
@@ -374,9 +452,8 @@ void Game::skillMeteorBurst()
     // 以玩家中心为发射原点
     QPointF center = player->sceneBoundingRect().center();
 
-    qreal speed = 10.0;      // 流星飞行速度（像素/帧）
-    int damage = 25;         // 伤害值（预留，供后续血量系统使用）
-    bool decay = true;       // 是否衰减（true=逐渐变小消失；改为 false 可测试不衰减模式）
+    qreal speed = 8.0;       // 火炮飞行速度（像素/帧）
+    int damage = 25;         // 伤害值
 
     // 8 个方向：上、右上、右、右下、下、左下、左、左上
     QVector<QPointF> directions = {
@@ -391,7 +468,7 @@ void Game::skillMeteorBurst()
     };
 
     for (const QPointF &dir : directions) {
-        Projectile *p = new Projectile(center, dir, damage, decay, tileMap, scene);
+        Projectile *p = new Projectile(center, dir, damage, tileMap, scene);
         projectiles.append(p);
     }
 }
@@ -421,10 +498,40 @@ void Game::updateProjectiles()
         }
 
         if (!alive) {
+            createExplosion(p->sceneBoundingRect().center());
             delete p;
             projectiles.removeAt(i);
         }
     }
+}
+
+void Game::createExplosion(QPointF centerPos)
+{
+    if (!scene || g_bombFrames.isEmpty()) return;
+
+    QGraphicsPixmapItem *item = new QGraphicsPixmapItem();
+    item->setTransformationMode(Qt::SmoothTransformation);
+    scene->addItem(item);
+    item->setPos(centerPos.x() - 48, centerPos.y() - 48);
+    item->setPixmap(g_bombFrames[0]);
+
+    QTimer *timer = new QTimer(this);
+    int *frameIdx = new int(0);
+
+    connect(timer, &QTimer::timeout, [timer, item, frameIdx]() {
+        (*frameIdx)++;
+        if (*frameIdx >= g_bombFrames.size()) {
+            timer->stop();
+            timer->deleteLater();
+            if (item->scene()) item->scene()->removeItem(item);
+            delete item;
+            delete frameIdx;
+            return;
+        }
+        item->setPixmap(g_bombFrames[*frameIdx]);
+    });
+
+    timer->start(8); // 8ms 一帧，约 125fps
 }
 
 QPointF Game::getCurrentDirectionVector()
@@ -453,6 +560,7 @@ QPointF Game::getCurrentDirectionVector()
 void Game::skillFlashBlade()
 {
     if (!player || !tileMap) return;
+    if (flashState.active) return; // 闪现中不能再次闪现
     if (!player->consumeMp(15)) return; // 消耗 15 MP，不足则无法释放
 
     // ========== 1. 检查是否有方向键被按下（静止时不触发）==========
@@ -462,55 +570,34 @@ void Game::skillFlashBlade()
 
     QPointF dir = getCurrentDirectionVector();
 
-    // ========== 2. 闪现（步进法，不能穿墙）==========
+    // ========== 2. 计算闪现目标位置（步进法，不能穿墙）==========
     qreal flashDistance = 100.0; // 最大闪现距离
     qreal step = 4.0;            // 每步检测 4 像素
-    QPointF oldCenter = player->sceneBoundingRect().center(); // 闪现前中心（轨迹用）
-    QPointF oldPos = player->pos(); // 闪现前左上角（setPos 用）
+    QPointF oldPos = player->pos(); // 闪现前左上角
     QPointF currentPos = oldPos;
     QPointF finalPos = oldPos;
 
     for (qreal dist = step; dist <= flashDistance; dist += step) {
         QPointF testPos = oldPos + QPointF(dir.x() * dist, dir.y() * dist);
         player->setPos(testPos);
-        if (tileMap->collidesWithWall(player)) {
-            // 撞墙了，停在当前安全位置
-            player->setPos(currentPos);
+        if (tileMap->collidesWithWall(player->hitboxRect())) {
             finalPos = currentPos;
             break;
         }
         currentPos = testPos;
         finalPos = testPos;
     }
-    centerOn(player); // 闪现后摄像头跟随
-    QPointF finalCenter = player->sceneBoundingRect().center(); // 闪现后中心（轨迹用）
 
-    // ========== 3. 闪现轨迹红光效果 ==========
-    int trailCount = 12;
-    for (int i = 0; i < trailCount; ++i) {
-        qreal ratio = static_cast<qreal>(i) / trailCount;
-        QPointF trailPos = oldCenter + (finalCenter - oldCenter) * ratio;
-        QGraphicsEllipseItem *dot = new QGraphicsEllipseItem(-4, -4, 8, 8);
-        dot->setPos(trailPos);
-        dot->setBrush(QBrush(QColor(255, 50, 50, 200)));
-        dot->setPen(Qt::NoPen);
-        scene->addItem(dot);
-        // 200ms 后自动删除
-        QTimer::singleShot(200, [dot]() { delete dot; });
-    }
+    // 把玩家位置恢复为 oldPos，由 updateGame 中的闪现动画逐步移动
+    player->setPos(oldPos);
 
-    // ========== 4. 射出刀浪 ==========
-    qreal bladeSpeed = 12.0;   // 刀浪飞行速度（像素/帧）
-    int damage = 40;           // 刀浪伤害值（比流星高）
-
-    // 刀浪起始位置：玩家闪现后的前方一点
-    QPointF bladeStart = player->sceneBoundingRect().center()
-                         + QPointF(dir.x() * 20.0, dir.y() * 20.0);
-
-    QPointF bladeVelocity(dir.x() * bladeSpeed, dir.y() * bladeSpeed);
-
-    BladeWave *bw = new BladeWave(bladeStart, bladeVelocity, damage, tileMap, scene);
-    bladeWaves.append(bw);
+    // ========== 3. 设置跨帧闪现状态 ==========
+    const int FLASH_FRAMES = 5;
+    flashState.active = true;
+    flashState.step = (finalPos - oldPos) / FLASH_FRAMES;
+    flashState.framesLeft = FLASH_FRAMES;
+    flashState.finalPos = finalPos;
+    flashState.bladeDir = dir;
 }
 
 void Game::updateBladeWaves()
@@ -549,45 +636,48 @@ void Game::skillNormalAttack()
     if (!player || !scene) return;
 
     // ========== 1. 九宫格攻击范围 ==========
-    // 玩家中心 + 周围 3x3 瓦片区域 = 96x96 像素（中心 ±48）
     QPointF playerCenter = player->sceneBoundingRect().center();
     QRectF attackRect(playerCenter.x() - 48.0, playerCenter.y() - 48.0, 96.0, 96.0);
 
-    // ========== 2. 火光闪烁视觉效果 ==========
-    // 第一层：深色底框
-    QGraphicsRectItem *fireBase = new QGraphicsRectItem(attackRect);
-    fireBase->setBrush(QBrush(QColor(180, 60, 0, 120)));
-    fireBase->setPen(QPen(QColor(255, 120, 0, 180), 2));
-    scene->addItem(fireBase);
+    // ========== 2. 普攻 GIF 特效（持续 2 秒后消失）==========
+    QMovie *hitMovie = new QMovie(":/images/fire_hit.gif");
+    QGraphicsPixmapItem *hitItem = new QGraphicsPixmapItem();
+    hitItem->setTransformationMode(Qt::SmoothTransformation);
+    scene->addItem(hitItem);
 
-    // 第二层：中心亮光（稍小一点）
-    QRectF innerRect(playerCenter.x() - 32.0, playerCenter.y() - 32.0, 64.0, 64.0);
-    QGraphicsRectItem *fireInner = new QGraphicsRectItem(innerRect);
-    fireInner->setBrush(QBrush(QColor(255, 180, 50, 160)));
-    fireInner->setPen(Qt::NoPen);
-    scene->addItem(fireInner);
+    connect(hitMovie, &QMovie::frameChanged, [hitItem, hitMovie](int) {
+        QPixmap frame = hitMovie->currentPixmap();
+        if (!frame.isNull()) {
+            frame = frame.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            hitItem->setPixmap(frame);
+        }
+    });
 
-    // 闪烁动画：50ms 变亮 → 100ms 变暗 → 150ms 删除
-    QTimer::singleShot(50, [fireBase, fireInner]() {
-        fireBase->setBrush(QBrush(QColor(255, 100, 0, 160)));
-        fireBase->setPen(QPen(QColor(255, 220, 100, 220), 3));
-        fireInner->setBrush(QBrush(QColor(255, 220, 100, 200)));
+    // 动画停止后延迟清理，避免在信号处理中直接销毁 QMovie
+    connect(hitMovie, &QMovie::stateChanged, [hitItem, hitMovie](QMovie::MovieState state) {
+        if (state == QMovie::NotRunning) {
+            QTimer::singleShot(0, [hitItem, hitMovie]() {
+                if (hitItem->scene()) hitItem->scene()->removeItem(hitItem);
+                delete hitItem;
+                delete hitMovie;
+            });
+        }
     });
-    QTimer::singleShot(100, [fireBase, fireInner]() {
-        fireBase->setBrush(QBrush(QColor(150, 50, 0, 80)));
-        fireBase->setPen(QPen(QColor(255, 150, 0, 120), 2));
-        fireInner->setBrush(QBrush(QColor(255, 150, 0, 100)));
+
+    // 2 秒后延迟停止（让火焰持续显示 2 秒）
+    QTimer::singleShot(2000, [hitMovie]() {
+        if (hitMovie->state() != QMovie::NotRunning) {
+            QTimer::singleShot(0, hitMovie, &QMovie::stop);
+        }
     });
-    QTimer::singleShot(200, [fireBase, fireInner]() {
-        delete fireBase;
-        delete fireInner;
-    });
+
+    hitMovie->start();
+    hitItem->setPos(playerCenter.x() - 48, playerCenter.y() - 48);
 
     // ========== 3. 伤害检测（九宫格范围内的 hittable 对象）==========
     for (QGraphicsItem *hittable : hittableItems) {
         QRectF hittableRect = hittable->boundingRect().translated(hittable->pos());
         if (attackRect.intersects(hittableRect)) {
-            // 对 Enemy 造成实际伤害
             Enemy *enemy = dynamic_cast<Enemy*>(hittable);
             if (enemy) {
                 enemy->takeDamage(15);
@@ -670,6 +760,18 @@ void Game::createHud()
     hudMpFg->setPen(Qt::NoPen);
     scene->addItem(hudMpFg);
 
+    // 经验条背景（灰色）
+    hudExpBg = new QGraphicsRectItem(0, 0, 120, 10);
+    hudExpBg->setBrush(QBrush(QColor(60, 60, 60, 200)));
+    hudExpBg->setPen(QPen(Qt::black, 1));
+    scene->addItem(hudExpBg);
+
+    // 经验条前景（金黄色）
+    hudExpFg = new QGraphicsRectItem(0, 0, 120, 10);
+    hudExpFg->setBrush(QBrush(QColor(218, 165, 32, 230)));
+    hudExpFg->setPen(Qt::NoPen);
+    scene->addItem(hudExpFg);
+
     // 文字
     hudText = new QGraphicsSimpleTextItem();
     hudText->setBrush(QBrush(Qt::white));
@@ -678,6 +780,15 @@ void Game::createHud()
     font.setBold(true);
     hudText->setFont(font);
     scene->addItem(hudText);
+
+    // 等级文字
+    hudLevelText = new QGraphicsSimpleTextItem();
+    hudLevelText->setBrush(QBrush(Qt::yellow));
+    QFont lvlFont = hudLevelText->font();
+    lvlFont.setPointSize(11);
+    lvlFont.setBold(true);
+    hudLevelText->setFont(lvlFont);
+    scene->addItem(hudLevelText);
 }
 
 void Game::updateHud()
@@ -699,19 +810,36 @@ void Game::updateHud()
     hudMpFg->setRect(hudPos.x(), hudPos.y() + 18, 120 * mpRatio, 14);
     hudMpBg->setRect(hudPos.x(), hudPos.y() + 18, 120, 14);
 
+    // 更新经验条宽度
+    qreal expRatio = static_cast<qreal>(player->getExp()) / player->getMaxExp();
+    if (expRatio < 0) expRatio = 0;
+    hudExpFg->setRect(hudPos.x(), hudPos.y() + 34, 120 * expRatio, 10);
+    hudExpBg->setRect(hudPos.x(), hudPos.y() + 34, 120, 10);
+
     // 更新文字
     QString text = QString("HP:%1/%2  MP:%3/%4")
                        .arg(player->getHp()).arg(player->getMaxHp())
                        .arg(player->getMp()).arg(player->getMaxMp());
     hudText->setText(text);
-    hudText->setPos(hudPos.x() + 2, hudPos.y() + 34);
+    hudText->setPos(hudPos.x() + 2, hudPos.y() + 46);
+
+    // 更新等级文字
+    QString lvlText = QString("LV.%1  EXP:%2/%3")
+                          .arg(player->getLevel())
+                          .arg(player->getExp())
+                          .arg(player->getMaxExp());
+    hudLevelText->setText(lvlText);
+    hudLevelText->setPos(hudPos.x() + 2, hudPos.y() + 62);
 
     // 确保 HUD 在最上层
     hudHpBg->setZValue(1000);
     hudHpFg->setZValue(1001);
     hudMpBg->setZValue(1000);
     hudMpFg->setZValue(1001);
+    hudExpBg->setZValue(1000);
+    hudExpFg->setZValue(1001);
     hudText->setZValue(1002);
+    hudLevelText->setZValue(1002);
 }
 
 void Game::addEnemyProjectile(EnemyProjectile *ep)
@@ -723,17 +851,58 @@ void Game::addEnemyProjectile(EnemyProjectile *ep)
 
 void Game::updateEnemies()
 {
+    // 根据玩家等级调整所有敌人的攻击间隔（等级越高，怪物射得越快）
+    int playerLevel = player ? player->getLevel() : 1;
+    int newInterval = qMax(30, 120 - (playerLevel - 1) * 15);
+
     // 倒序遍历，方便安全删除已死亡的敌人
     for (int i = enemies.size() - 1; i >= 0; --i) {
         Enemy *e = enemies[i];
+        e->setAttackInterval(newInterval);
         e->update();
         if (e->isDead()) {
             // 从可攻击列表中移除
             hittableItems.removeAll(e);
+            // 给玩家加经验
+            if (player) {
+                player->addExp(20);
+            }
             delete e;
             enemies.removeAt(i);
         }
     }
+}
+
+void Game::updateSpawners()
+{
+    for (Spawner *s : spawners) {
+        s->update();
+    }
+}
+
+void Game::addEnemy(Enemy *e)
+{
+    if (e) {
+        enemies.append(e);
+        hittableItems.append(e);
+    }
+}
+
+void Game::onPlayerLevelUp(int newLevel)
+{
+    qDebug() << "Player leveled up to" << newLevel;
+    if (newLevel == 5) {
+        applyLevel10Enhancement();
+    }
+}
+
+void Game::applyLevel10Enhancement()
+{
+    qDebug() << "Level 10 enhancement applied!";
+    if (player) {
+        player->setEnhanced(true);
+    }
+    // TODO: 可以在这里添加屏幕闪烁、粒子特效等视觉反馈
 }
 
 void Game::updateEnemyProjectiles()
@@ -772,7 +941,7 @@ void Game::performTeleport(const Portal &portal)
         return;
     }
 
-    QRectF playerRect = player->sceneBoundingRect();
+    QRectF playerRect = player->hitboxRect();
     bool stillIntersects = false;
     for (const Portal &p : tileMap->getPortals()) {
         if (playerRect.intersects(p.rect)) {
@@ -787,12 +956,32 @@ void Game::performTeleport(const Portal &portal)
         return;
     }
 
+    // 辅助：安全传送到目标点（自动处理卡墙微调）
+    auto safeTeleportTo = [&](const QPointF &target) {
+        QPointF basePos = target - QPointF(32, 32);
+        player->setPos(basePos);
+        if (tileMap->collidesWithWall(player->hitboxRect())) {
+            const QVector<QPointF> offsets = {
+                QPointF(0, -32), QPointF(0, 32),
+                QPointF(-32, 0), QPointF(32, 0),
+                QPointF(-32, -32), QPointF(32, -32),
+                QPointF(-32, 32), QPointF(32, 32)
+            };
+            for (const QPointF &off : offsets) {
+                player->setPos(basePos + off);
+                if (!tileMap->collidesWithWall(player->hitboxRect())) {
+                    return;
+                }
+            }
+        }
+    };
+
     // 判断同地图还是跨地图
     if (portal.targetMap.isEmpty() || portal.targetMap == currentMapPath) {
         // 同地图传送：直接移动玩家
         for (const Portal &p : tileMap->getPortals()) {
             if (p.id == portal.targetPortalId) {
-                player->setPos(p.rect.center());
+                safeTeleportTo(p.rect.center());
                 centerOn(player);
                 break;
             }
@@ -811,7 +1000,7 @@ void Game::performTeleport(const Portal &portal)
         bool found = false;
         for (const Portal &p : tileMap->getPortals()) {
             if (p.id == portal.targetPortalId) {
-                player->setPos(p.rect.center());
+                safeTeleportTo(p.rect.center());
                 centerOn(player);
                 found = true;
                 break;
@@ -821,7 +1010,7 @@ void Game::performTeleport(const Portal &portal)
             // 如果找不到目标传送门，使用 start 点作为后备
             QPointF startPos = tileMap->getPlayerStart();
             if (!startPos.isNull()) {
-                player->setPos(startPos);
+                safeTeleportTo(startPos);
                 centerOn(player);
             } else {
                 qDebug() << "Warning: target portal not found, and no start point.";
