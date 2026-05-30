@@ -1,0 +1,25 @@
+TEMPLATE = app
+TARGET = Qt-Gaming
+QT += widgets
+RESOURCES += resources.qrc
+
+SOURCES += \
+    main.cpp \
+    game.cpp \
+    player.cpp \
+    tilemap.cpp \
+    tile.cpp \
+    maploader.cpp \
+    skill.cpp \
+    enemy.cpp
+
+HEADERS += \
+    game.h \
+    player.h \
+    tilemap.h \
+    tile.h \
+    maploader.h \
+    skill.h \
+    enemy.h
+
+CONFIG += console
