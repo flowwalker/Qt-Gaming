@@ -1,10 +1,15 @@
 <RCC>
     <qresource prefix="/">
         <file>images/floor.png</file>
+        <file>images/floor_dark.png</file>
+        <file>images/floor_light.png</file>
         <file>images/player.gif</file>
         <file>images/player.png</file>
         <file>images/portal.png</file>
         <file>images/wall.png</file>
+        <file>images/wall_1.png</file>
+        <file>images/wall_2.png</file>
+        <file>images/wall_3.png</file>
         <file>images/boss.png</file>
         <file>images/chest.png</file>
         <file>images/door.png</file>

@@ -3,17 +3,21 @@
 #include <QPixmap>
 #include <QDebug>
 #include <QMovie>
+#include <QTransform>
 
 Player::Player(TileMap *map, QGraphicsItem *parent)
     : QGraphicsPixmapItem(parent), tileMap(map), speed(4.0), movie(nullptr)
 {
-    // 尝试加载 GIF 动画
+    // 尝试加载 GIF 动画（保留原始分辨率，用 transform 缩放到 32x32）
     movie = new QMovie(":/images/player.gif");
     if (movie->isValid()) {
-        // GIF 原始尺寸 246x240，缩放到与原来静态图一致的 32x32
-        movie->setScaledSize(QSize(32, 32));
         connect(movie, &QMovie::frameChanged, this, &Player::onFrameChanged);
         movie->start();
+
+        QSize origSize = movie->currentPixmap().size();
+        qreal sx = 32.0 / origSize.width();
+        qreal sy = 32.0 / origSize.height();
+        setTransform(QTransform::fromScale(sx, sy));
     } else {
         qDebug() << "Failed to load player.gif, falling back to static image.";
         delete movie;
@@ -26,8 +30,12 @@ Player::Player(TileMap *map, QGraphicsItem *parent)
             pixmap.fill(Qt::blue);
         }
         setPixmap(pixmap);
+        qreal sx = 32.0 / pixmap.width();
+        qreal sy = 32.0 / pixmap.height();
+        setTransform(QTransform::fromScale(sx, sy));
     }
     setShapeMode(QGraphicsPixmapItem::BoundingRectShape);
+    setTransformationMode(Qt::SmoothTransformation);
 }
 
 Player::~Player()

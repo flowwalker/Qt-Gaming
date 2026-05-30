@@ -49,6 +49,13 @@ private:
 
     int regenCounter = 0; // HP/MP 恢复计时器（每 60 帧恢复 1 点）
 
+    // 视野缩放
+    qreal zoomLevel = 1.0;
+    static constexpr qreal ZOOM_STEP = 1.15;
+    static constexpr qreal MIN_ZOOM = 0.3;
+    static constexpr qreal MAX_ZOOM = 4.0;
+    void applyZoom();
+
     // ========== HUD 血蓝条 ==========
     QGraphicsRectItem *hudHpBg = nullptr;
     QGraphicsRectItem *hudHpFg = nullptr;

@@ -73,7 +73,7 @@ Enemy::Enemy(TileMap *tileMap, QGraphicsScene *scene, QPointF startPos, Game *ga
       maxHp(50),
       dead(false)
 {
-    // 加载怪物贴图
+    // 加载怪物贴图（保留原始分辨率，用 transform 缩放到 32x32）
     QPixmap pixmap(":/images/minion.png");
     if (pixmap.isNull()) {
         qDebug() << "Failed to load minion.png, using green placeholder.";
@@ -81,8 +81,12 @@ Enemy::Enemy(TileMap *tileMap, QGraphicsScene *scene, QPointF startPos, Game *ga
         pixmap.fill(Qt::darkGreen);
     }
     setPixmap(pixmap);
+    qreal sx = 32.0 / pixmap.width();
+    qreal sy = 32.0 / pixmap.height();
+    setTransform(QTransform::fromScale(sx, sy));
     setPos(startPos);
     setShapeMode(QGraphicsPixmapItem::BoundingRectShape);
+    setTransformationMode(Qt::SmoothTransformation);
 
     if (scene) {
         scene->addItem(this);

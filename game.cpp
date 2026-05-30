@@ -268,6 +268,10 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
         centerOn(player);
     }
 
+    // 重置缩放为默认值
+    zoomLevel = 1.0;
+    applyZoom();
+
     // 创建 HUD（血蓝条）
     createHud();
 
@@ -290,6 +294,17 @@ void Game::keyPressEvent(QKeyEvent *event)
     case Qt::Key_J: skillNormalAttack(); break;  // ← J键：普攻（九宫格火光）
     case Qt::Key_K: skillFlashBlade(); break;    // ← K键：闪现刀浪技能（二技能）
     case Qt::Key_L: skillShieldActivate(); break;// ← L键：激活盾牌（三技能）
+    case Qt::Key_Plus:
+    case Qt::Key_Equal:  // 兼容主键盘 =/+ 键
+        zoomLevel *= ZOOM_STEP;
+        if (zoomLevel > MAX_ZOOM) zoomLevel = MAX_ZOOM;
+        applyZoom();
+        break;
+    case Qt::Key_Minus:
+        zoomLevel /= ZOOM_STEP;
+        if (zoomLevel < MIN_ZOOM) zoomLevel = MIN_ZOOM;
+        applyZoom();
+        break;
     default: QGraphicsView::keyPressEvent(event);
     }
 }
@@ -337,7 +352,7 @@ void Game::checkPortal()
     if (!canTeleport || isTeleporting) return;
     if (!player || !tileMap) return; // 安全检查
 
-    QRectF playerRect = player->boundingRect().translated(player->pos());
+    QRectF playerRect = player->sceneBoundingRect();
     for (const Portal &portal : tileMap->getPortals()) {
         if (playerRect.intersects(portal.rect)) {
             canTeleport = false;
@@ -357,9 +372,7 @@ void Game::skillMeteorBurst()
     if (!player->consumeMp(10)) return; // 消耗 10 MP，不足则无法释放
 
     // 以玩家中心为发射原点
-    QPointF center = player->pos()
-                     + QPointF(player->boundingRect().width() / 2.0,
-                               player->boundingRect().height() / 2.0);
+    QPointF center = player->sceneBoundingRect().center();
 
     qreal speed = 10.0;      // 流星飞行速度（像素/帧）
     int damage = 25;         // 伤害值（预留，供后续血量系统使用）
@@ -452,7 +465,8 @@ void Game::skillFlashBlade()
     // ========== 2. 闪现（步进法，不能穿墙）==========
     qreal flashDistance = 100.0; // 最大闪现距离
     qreal step = 4.0;            // 每步检测 4 像素
-    QPointF oldPos = player->pos();
+    QPointF oldCenter = player->sceneBoundingRect().center(); // 闪现前中心（轨迹用）
+    QPointF oldPos = player->pos(); // 闪现前左上角（setPos 用）
     QPointF currentPos = oldPos;
     QPointF finalPos = oldPos;
 
@@ -469,14 +483,13 @@ void Game::skillFlashBlade()
         finalPos = testPos;
     }
     centerOn(player); // 闪现后摄像头跟随
+    QPointF finalCenter = player->sceneBoundingRect().center(); // 闪现后中心（轨迹用）
 
     // ========== 3. 闪现轨迹红光效果 ==========
     int trailCount = 12;
     for (int i = 0; i < trailCount; ++i) {
         qreal ratio = static_cast<qreal>(i) / trailCount;
-        QPointF trailPos = oldPos + (finalPos - oldPos) * ratio
-                         + QPointF(player->boundingRect().width() / 2.0,
-                                   player->boundingRect().height() / 2.0);
+        QPointF trailPos = oldCenter + (finalCenter - oldCenter) * ratio;
         QGraphicsEllipseItem *dot = new QGraphicsEllipseItem(-4, -4, 8, 8);
         dot->setPos(trailPos);
         dot->setBrush(QBrush(QColor(255, 50, 50, 200)));
@@ -491,9 +504,7 @@ void Game::skillFlashBlade()
     int damage = 40;           // 刀浪伤害值（比流星高）
 
     // 刀浪起始位置：玩家闪现后的前方一点
-    QPointF bladeStart = player->pos()
-                         + QPointF(player->boundingRect().width() / 2.0,
-                                   player->boundingRect().height() / 2.0)
+    QPointF bladeStart = player->sceneBoundingRect().center()
                          + QPointF(dir.x() * 20.0, dir.y() * 20.0);
 
     QPointF bladeVelocity(dir.x() * bladeSpeed, dir.y() * bladeSpeed);
@@ -539,9 +550,7 @@ void Game::skillNormalAttack()
 
     // ========== 1. 九宫格攻击范围 ==========
     // 玩家中心 + 周围 3x3 瓦片区域 = 96x96 像素（中心 ±48）
-    QPointF playerCenter = player->pos()
-                         + QPointF(player->boundingRect().width() / 2.0,
-                                   player->boundingRect().height() / 2.0);
+    QPointF playerCenter = player->sceneBoundingRect().center();
     QRectF attackRect(playerCenter.x() - 48.0, playerCenter.y() - 48.0, 96.0, 96.0);
 
     // ========== 2. 火光闪烁视觉效果 ==========
@@ -596,9 +605,7 @@ void Game::skillShieldActivate()
 
     // 创建盾牌：比玩家稍大的圆形（半径 28px）
     shieldItem = new QGraphicsEllipseItem(-28, -28, 56, 56);
-    shieldItem->setPos(player->pos()
-                       + QPointF(player->boundingRect().width() / 2.0,
-                                 player->boundingRect().height() / 2.0));
+    shieldItem->setPos(player->sceneBoundingRect().center());
     // 盾牌颜色：半透明青蓝色 + 发光边框
     shieldItem->setBrush(QBrush(QColor(100, 180, 255, 80)));
     shieldItem->setPen(QPen(QColor(150, 220, 255, 150), 3));
@@ -622,9 +629,16 @@ void Game::skillShieldDeactivate()
 void Game::updateShieldPosition()
 {
     if (shieldActive && shieldItem && player) {
-        shieldItem->setPos(player->pos()
-                          + QPointF(player->boundingRect().width() / 2.0,
-                                    player->boundingRect().height() / 2.0));
+        shieldItem->setPos(player->sceneBoundingRect().center());
+    }
+}
+
+void Game::applyZoom()
+{
+    resetTransform();
+    scale(zoomLevel, zoomLevel);
+    if (player) {
+        centerOn(player);
     }
 }
 
@@ -758,7 +772,7 @@ void Game::performTeleport(const Portal &portal)
         return;
     }
 
-    QRectF playerRect = player->boundingRect().translated(player->pos());
+    QRectF playerRect = player->sceneBoundingRect();
     bool stillIntersects = false;
     for (const Portal &p : tileMap->getPortals()) {
         if (playerRect.intersects(p.rect)) {
