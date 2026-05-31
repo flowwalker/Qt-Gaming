@@ -15,6 +15,8 @@
 namespace {
     QVector<QPixmap> g_bombFrames;
     bool g_bombLoaded = false;
+    QVector<QPixmap> g_fireBgFrames;
+    bool g_fireBgLoaded = false;
 
     void loadBombFrames()
     {
@@ -38,6 +40,24 @@ namespace {
             qDebug() << "Failed to load bomb.gif frames";
         }
     }
+
+    void loadFireBgFrames()
+    {
+        if (g_fireBgLoaded) return;
+        g_fireBgLoaded = true;
+        QImageReader reader(":/images/player_background_fire.gif");
+        reader.setAutoDetectImageFormat(true);
+        while (reader.canRead()) {
+            QImage img = reader.read();
+            if (!img.isNull()) {
+                g_fireBgFrames.append(QPixmap::fromImage(img).scaled(
+                    96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            }
+        }
+        if (g_fireBgFrames.isEmpty()) {
+            qDebug() << "Failed to load player_background_fire.gif frames";
+        }
+    }
 }
 
 Game::Game(QWidget *parent)
@@ -51,9 +71,10 @@ Game::Game(QWidget *parent)
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-    // 预加载 Projectile / Bomb 帧缓存，避免首次释放技能时卡顿
+    // 预加载 Projectile / Bomb / FireBg 帧缓存，避免首次释放技能时卡顿
     preloadProjectileFrames();
     loadBombFrames();
+    loadFireBgFrames();
 
     // 加载初始地图（使用 start 点）
     loadMap(":/maps/school_map.tmj", true);
@@ -85,6 +106,12 @@ Game::~Game()
         shieldItem = nullptr;
     }
     shieldActive = false;
+
+    // 清理背后火焰
+    if (fireBgItem) {
+        delete fireBgItem;
+        fireBgItem = nullptr;
+    }
 
     // 清理所有敌人
     for (Enemy *e : enemies) {
@@ -428,6 +455,19 @@ void Game::updateGame()
     updateSimpleProjectiles(); // ← 更新所有简易子弹
     updateBladeWaves();        // ← 更新所有刀浪
     updateShieldPosition();    // ← 更新盾牌跟随玩家
+
+    // 更新背后火焰（5级启用）
+    if (fireBgEnabled && fireBgItem && player) {
+        QRectF playerRect = player->sceneBoundingRect();
+        fireBgItem->setPos(playerRect.center().x() - 48, playerRect.center().y() - 48);
+        fireBgTick++;
+        if (fireBgTick >= 2) {
+            fireBgTick = 0;
+            fireBgFrameIdx = (fireBgFrameIdx + 1) % g_fireBgFrames.size();
+            fireBgItem->setPixmap(g_fireBgFrames[fireBgFrameIdx]);
+        }
+    }
+
     updateEnemies();           // ← 更新所有敌人
     updateEnemyProjectiles();  // ← 更新所有敌人炮弹
     updateSpawners();          // ← 更新所有巢穴
@@ -946,9 +986,17 @@ void Game::onPlayerLevelUp(int newLevel)
         playTransformAnimation();
     }
     if (newLevel == 5) {
-        // 5级：启用爆炸效果
+        // 5级：启用爆炸效果 + 背后火焰
         explosionsEnabled = true;
-        qDebug() << "Level 5: explosions enabled!";
+        fireBgEnabled = true;
+        if (!fireBgItem && scene && !g_fireBgFrames.isEmpty()) {
+            fireBgItem = new QGraphicsPixmapItem();
+            fireBgItem->setTransformationMode(Qt::SmoothTransformation);
+            fireBgItem->setZValue(-1); // 在玩家背后
+            scene->addItem(fireBgItem);
+            fireBgItem->setPixmap(g_fireBgFrames[0]);
+        }
+        qDebug() << "Level 5: explosions and fire background enabled!";
     }
 }
 

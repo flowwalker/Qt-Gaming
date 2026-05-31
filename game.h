@@ -103,8 +103,12 @@ private:
 
     bool gamePaused = false;        // 变身动画期间暂停游戏
     bool explosionsEnabled = false; // 5级后启用爆炸效果
+    bool fireBgEnabled = false;     // 5级后启用背后火焰
     QGraphicsPixmapItem *transformItem = nullptr;
     QMovie *transformMovie = nullptr;
+    QGraphicsPixmapItem *fireBgItem = nullptr;
+    int fireBgFrameIdx = 0;
+    int fireBgTick = 0;
 
     /** 技能一：粒子爆发（按 I 键触发） */
     void skillMeteorBurst();
