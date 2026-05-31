@@ -175,6 +175,56 @@ bool Projectile::update()
 }
 
 // ============================================================================
+//  简易投射物（1-2 级红色椭圆子弹）
+// ============================================================================
+
+SimpleProjectile::SimpleProjectile(QPointF startPos, QPointF velocity, int damage,
+                                   TileMap *tileMap, QGraphicsScene *scene,
+                                   QGraphicsItem *parent)
+    : QGraphicsEllipseItem(parent),
+      velocity(velocity),
+      damage(damage),
+      tileMap(tileMap),
+      m_scene(scene),
+      distanceTraveled(0.0),
+      maxDistance(400.0)
+{
+    setRect(-6, -6, 12, 12);
+    setBrush(QBrush(QColor(255, 60, 0, 220)));
+    setPen(QPen(QColor(255, 160, 0), 2));
+    setPos(startPos);
+    if (scene) scene->addItem(this);
+}
+
+SimpleProjectile::~SimpleProjectile()
+{
+}
+
+bool SimpleProjectile::update()
+{
+    QPointF oldPos = pos();
+    setPos(oldPos + velocity);
+    distanceTraveled += QLineF(oldPos, pos()).length();
+
+    if (distanceTraveled >= maxDistance) {
+        return false;
+    }
+
+    if (tileMap && tileMap->collidesWithWall(this)) {
+        return false;
+    }
+
+    if (m_scene) {
+        QRectF sceneRect = m_scene->sceneRect();
+        if (!sceneRect.contains(pos())) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// ============================================================================
 //  二技能：刀浪（Blade Wave）
 // ============================================================================
 

@@ -67,6 +67,12 @@ Game::~Game()
     }
     projectiles.clear();
 
+    // 清理所有简易子弹
+    for (SimpleProjectile *sp : simpleProjectiles) {
+        delete sp;
+    }
+    simpleProjectiles.clear();
+
     // 清理所有刀浪
     for (BladeWave *bw : bladeWaves) {
         delete bw;
@@ -371,6 +377,9 @@ void Game::keyReleaseEvent(QKeyEvent *event)
 
 void Game::updateGame()
 {
+    // 变身动画期间暂停游戏
+    if (gamePaused) return;
+
     // ========== 闪现动画（优先处理）==========
     if (flashState.active && player) {
         player->setPos(player->pos() + flashState.step);
@@ -416,6 +425,7 @@ void Game::updateGame()
     }
 
     updateProjectiles();       // ← 更新所有流星粒子
+    updateSimpleProjectiles(); // ← 更新所有简易子弹
     updateBladeWaves();        // ← 更新所有刀浪
     updateShieldPosition();    // ← 更新盾牌跟随玩家
     updateEnemies();           // ← 更新所有敌人
@@ -454,6 +464,7 @@ void Game::skillMeteorBurst()
 
     qreal speed = 8.0;       // 火炮飞行速度（像素/帧）
     int damage = 25;         // 伤害值
+    int level = player->getLevel();
 
     // 8 个方向：上、右上、右、右下、下、左下、左、左上
     QVector<QPointF> directions = {
@@ -468,8 +479,15 @@ void Game::skillMeteorBurst()
     };
 
     for (const QPointF &dir : directions) {
-        Projectile *p = new Projectile(center, dir, damage, tileMap, scene);
-        projectiles.append(p);
+        if (level >= 3) {
+            // 3级+：发射 GIF 飞火弹
+            Projectile *p = new Projectile(center, dir, damage, tileMap, scene);
+            projectiles.append(p);
+        } else {
+            // 1-2级：发射简易红色椭圆子弹
+            SimpleProjectile *sp = new SimpleProjectile(center, dir, damage, tileMap, scene);
+            simpleProjectiles.append(sp);
+        }
     }
 }
 
@@ -498,9 +516,41 @@ void Game::updateProjectiles()
         }
 
         if (!alive) {
-            createExplosion(p->sceneBoundingRect().center());
+            if (explosionsEnabled) {
+                createExplosion(p->sceneBoundingRect().center());
+            }
             delete p;
             projectiles.removeAt(i);
+        }
+    }
+}
+
+void Game::updateSimpleProjectiles()
+{
+    // 倒序遍历，方便安全删除已死亡的简易子弹
+    for (int i = simpleProjectiles.size() - 1; i >= 0; --i) {
+        SimpleProjectile *sp = simpleProjectiles[i];
+        bool alive = sp->update();
+
+        // 检测是否击中可攻击对象
+        if (alive) {
+            for (QGraphicsItem *hittable : hittableItems) {
+                if (sp->collidesWithItem(hittable)) {
+                    Enemy *enemy = dynamic_cast<Enemy*>(hittable);
+                    if (enemy) {
+                        enemy->takeDamage(sp->getDamage());
+                    }
+                    qDebug() << "Simple projectile hit! Damage:" << sp->getDamage()
+                             << "to hittable object at" << hittable->pos();
+                    alive = false;
+                    break;
+                }
+            }
+        }
+
+        if (!alive) {
+            delete sp;
+            simpleProjectiles.removeAt(i);
         }
     }
 }
@@ -891,18 +941,65 @@ void Game::addEnemy(Enemy *e)
 void Game::onPlayerLevelUp(int newLevel)
 {
     qDebug() << "Player leveled up to" << newLevel;
+    if (newLevel == 3) {
+        // 3级：播放变身动画，结束后自动 setEnhanced(true)
+        playTransformAnimation();
+    }
     if (newLevel == 5) {
-        applyLevel10Enhancement();
+        // 5级：启用爆炸效果
+        explosionsEnabled = true;
+        qDebug() << "Level 5: explosions enabled!";
     }
 }
 
 void Game::applyLevel10Enhancement()
 {
-    qDebug() << "Level 10 enhancement applied!";
-    if (player) {
-        player->setEnhanced(true);
-    }
-    // TODO: 可以在这里添加屏幕闪烁、粒子特效等视觉反馈
+    // 原逻辑已合并到 onPlayerLevelUp，保留空实现兼容旧调用
+}
+
+void Game::playTransformAnimation()
+{
+    if (!scene || !player) return;
+
+    gamePaused = true;
+    transformMovie = new QMovie(":/images/player_tranform.gif");
+    transformItem = new QGraphicsPixmapItem();
+    transformItem->setTransformationMode(Qt::SmoothTransformation);
+    transformItem->setZValue(9999);
+    scene->addItem(transformItem);
+
+    // 居中显示（基于视口中心对应的场景坐标）
+    QPointF viewCenter = mapToScene(viewport()->rect().center());
+    transformItem->setPos(viewCenter.x() - 400, viewCenter.y() - 388);
+
+    connect(transformMovie, &QMovie::frameChanged, [this](int frameNumber) {
+        QPixmap frame = transformMovie->currentPixmap();
+        if (!frame.isNull()) {
+            transformItem->setPixmap(frame);
+        }
+        if (transformMovie->frameCount() > 0 && frameNumber >= transformMovie->frameCount() - 1) {
+            QTimer::singleShot(0, transformMovie, &QMovie::stop);
+        }
+    });
+
+    connect(transformMovie, &QMovie::stateChanged, [this](QMovie::MovieState state) {
+        if (state == QMovie::NotRunning) {
+            QTimer::singleShot(0, [this]() {
+                if (transformItem) {
+                    if (transformItem->scene()) transformItem->scene()->removeItem(transformItem);
+                    delete transformItem; transformItem = nullptr;
+                }
+                if (transformMovie) {
+                    delete transformMovie; transformMovie = nullptr;
+                }
+                gamePaused = false;
+                if (player) player->setEnhanced(true);
+                qDebug() << "Transformation complete! Enhanced mode ON.";
+            });
+        }
+    });
+
+    transformMovie->start();
 }
 
 void Game::updateEnemyProjectiles()

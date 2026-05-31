@@ -43,6 +43,31 @@ private:
 };
 
 // ============================================================================
+//  简易投射物（1-2 级红色椭圆子弹）
+// ============================================================================
+
+class SimpleProjectile : public QObject, public QGraphicsEllipseItem
+{
+    Q_OBJECT
+public:
+    SimpleProjectile(QPointF startPos, QPointF velocity, int damage,
+                     TileMap *tileMap, QGraphicsScene *scene,
+                     QGraphicsItem *parent = nullptr);
+    ~SimpleProjectile();
+
+    bool update();
+    int getDamage() const { return damage; }
+
+private:
+    QPointF velocity;
+    int damage;
+    TileMap *tileMap;
+    QGraphicsScene *m_scene;
+    qreal distanceTraveled;
+    qreal maxDistance;
+};
+
+// ============================================================================
 //  二技能：刀浪（Blade Wave）
 // ============================================================================
 

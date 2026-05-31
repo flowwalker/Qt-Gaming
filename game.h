@@ -14,9 +14,11 @@
 class Player;
 class TileMap;
 class Projectile;
+class SimpleProjectile;
 class Enemy;
 class EnemyProjectile;
 class Spawner;
+class QMovie;
 
 class Game : public QGraphicsView
 {
@@ -87,19 +89,29 @@ private:
     // ========== 经验等级系统 ==========
     void onPlayerLevelUp(int newLevel);
     void applyLevel10Enhancement();
+    void playTransformAnimation(); // 3级变身动画
 
     // ========== 技能系统 ==========
     /** 当前场景中所有活跃的流星粒子 */
     QVector<Projectile*> projectiles;
+    /** 当前场景中所有活跃的简易子弹（1-2级红色椭圆） */
+    QVector<SimpleProjectile*> simpleProjectiles;
     /** 当前场景中所有活跃的刀浪 */
     QVector<BladeWave*> bladeWaves;
     /** 可被攻击的对象列表（Boss、小怪等），供碰撞检测使用 */
     QList<QGraphicsItem*> hittableItems;
 
+    bool gamePaused = false;        // 变身动画期间暂停游戏
+    bool explosionsEnabled = false; // 5级后启用爆炸效果
+    QGraphicsPixmapItem *transformItem = nullptr;
+    QMovie *transformMovie = nullptr;
+
     /** 技能一：粒子爆发（按 I 键触发） */
     void skillMeteorBurst();
     /** 每帧更新所有流星粒子（移动、碰撞、清理） */
     void updateProjectiles();
+    /** 每帧更新所有简易子弹（移动、碰撞、清理） */
+    void updateSimpleProjectiles();
     /** 在指定位置创建爆炸动画（3x3 tile 大小） */
     void createExplosion(QPointF centerPos);
 
