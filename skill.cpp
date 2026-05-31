@@ -282,7 +282,7 @@ bool TriangleProjectile::update()
 }
 
 // ============================================================================
-//  蓝色月牙投射物（N键普攻2）
+//  冰魄八荒投射物（N键普攻2）
 // ============================================================================
 
 BlueProjectile::BlueProjectile(QPointF startPos, QPointF velocity, int damage,

@@ -120,13 +120,13 @@ Game::~Game()
     }
     simpleProjectiles.clear();
 
-    // 清理所有蓝色月牙子弹
+    // 清理所有冰魄八荒子弹
     for (BlueProjectile *bp : blueProjectiles) {
         delete bp;
     }
     blueProjectiles.clear();
 
-    // 清理所有三角形子弹
+    // 清理所有破空梭
     for (TriangleProjectile *tp : triangleProjectiles) {
         delete tp;
     }
@@ -144,7 +144,7 @@ Game::~Game()
     }
     daolangWaves.clear();
 
-    // 清理盾牌
+    // 清理玄武盾
     if (shieldItem) {
         delete shieldItem;
         shieldItem = nullptr;
@@ -218,7 +218,7 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     }
     bladeWaves.clear();
 
-    // 清理盾牌
+    // 清理玄武盾
     if (shieldItem) {
         delete shieldItem;
         shieldItem = nullptr;
@@ -437,12 +437,12 @@ void Game::keyPressEvent(QKeyEvent *event)
     case Qt::Key_S: downPressed = true; break;
     case Qt::Key_A: leftPressed = true; break;
     case Qt::Key_D: rightPressed = true; break;
-    case Qt::Key_I: skillMeteorBurst(); break;   // ← I键：粒子爆发技能（一技能，静止时才能使用）
-    case Qt::Key_H: skillTriangleShot(); break;  // ← H键：单方向三角形子弹（朝移动方向）
+    case Qt::Key_I: skillMeteorBurst(); break;   // ← I键：天火燎原技能（一技能，静止时才能使用）
+    case Qt::Key_H: skillTriangleShot(); break;  // ← H键：单方向破空梭（朝移动方向）
     case Qt::Key_N: skillBlueBurst(); break;     // ← N键：普攻2（蓝色八方向月牙，可边移动边发射）
-    case Qt::Key_J: skillNormalAttack(); break;  // ← J键：普攻（九宫格火光）
-    case Qt::Key_K: skillFlashBlade(); break;    // ← K键：闪现刀浪技能（二技能）
-    case Qt::Key_L: skillShieldActivate(); break;// ← L键：激活盾牌（三技能）
+    case Qt::Key_J: skillNormalAttack(); break;  // ← J键：普攻（九重炎杀）
+    case Qt::Key_K: skillFlashBlade(); break;    // ← K键：瞬影浪斩技能（二技能）
+    case Qt::Key_L: skillShieldActivate(); break;// ← L键：激活玄武盾（三技能）
     case Qt::Key_Plus:
     case Qt::Key_Equal:  // 兼容主键盘 =/+ 键
         zoomLevel *= ZOOM_STEP;
@@ -465,7 +465,7 @@ void Game::keyReleaseEvent(QKeyEvent *event)
     case Qt::Key_S: downPressed = false; break;
     case Qt::Key_A: leftPressed = false; break;
     case Qt::Key_D: rightPressed = false; break;
-    case Qt::Key_L: skillShieldDeactivate(); break; // ← L键释放：关闭盾牌
+    case Qt::Key_L: skillShieldDeactivate(); break; // ← L键释放：关闭玄武盾
     default: QGraphicsView::keyReleaseEvent(event);
     }
 }
@@ -536,11 +536,11 @@ void Game::updateGame()
 
     updateProjectiles();        // ← 更新所有流星粒子
     updateSimpleProjectiles();  // ← 更新所有简易子弹
-    updateBlueProjectiles();    // ← 更新所有蓝色月牙子弹
-    updateTriangleProjectiles();// ← 更新所有三角形子弹
+    updateBlueProjectiles();    // ← 更新所有冰魄八荒子弹
+    updateTriangleProjectiles();// ← 更新所有破空梭
     updateBladeWaves();         // ← 更新所有刀浪
     updateDaolangWaves();       // ← 更新所有GIF刀浪
-    updateShieldPosition();    // ← 更新盾牌跟随玩家
+    updateShieldPosition();    // ← 更新玄武盾跟随玩家
 
     // 更新宠物
     if (pet && player) {
@@ -722,7 +722,7 @@ void Game::updateSimpleProjectiles()
 
 void Game::updateBlueProjectiles()
 {
-    // 倒序遍历，方便安全删除已死亡的蓝色月牙子弹
+    // 倒序遍历，方便安全删除已死亡的冰魄八荒子弹
     for (int i = blueProjectiles.size() - 1; i >= 0; --i) {
         BlueProjectile *bp = blueProjectiles[i];
         bool alive = bp->update();
@@ -752,7 +752,7 @@ void Game::updateBlueProjectiles()
 
 void Game::updateTriangleProjectiles()
 {
-    // 倒序遍历，方便安全删除已死亡的三角形子弹
+    // 倒序遍历，方便安全删除已死亡的破空梭
     for (int i = triangleProjectiles.size() - 1; i >= 0; --i) {
         TriangleProjectile *tp = triangleProjectiles[i];
         bool alive = tp->update();
@@ -1043,12 +1043,12 @@ void Game::skillNormalAttack()
 void Game::skillShieldActivate()
 {
     if (!player || !scene || shieldItem) return;
-    if (!player->consumeMp(5)) return; // 开启盾牌消耗 5 MP
+    if (!player->consumeMp(5)) return; // 开启玄武盾消耗 5 MP
 
-    // 创建盾牌：比玩家稍大的圆形（半径 28px）
+    // 创建玄武盾：比玩家稍大的圆形（半径 28px）
     shieldItem = new QGraphicsEllipseItem(-28, -28, 56, 56);
     shieldItem->setPos(player->sceneBoundingRect().center());
-    // 盾牌颜色：半透明青蓝色 + 发光边框
+    // 玄武盾颜色：半透明青蓝色 + 发光边框
     shieldItem->setBrush(QBrush(QColor(100, 180, 255, 80)));
     shieldItem->setPen(QPen(QColor(150, 220, 255, 150), 3));
     scene->addItem(shieldItem);
@@ -1313,7 +1313,7 @@ void Game::updateEnemyProjectiles()
 
         // 检测是否击中玩家
         if (alive && player && ep->collidesWithItem(player)) {
-            // 如果盾牌激活，阻挡伤害
+            // 如果玄武盾激活，阻挡伤害
             if (shieldActive) {
                 qDebug() << "Enemy projectile blocked by shield!";
             } else {

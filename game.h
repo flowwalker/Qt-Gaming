@@ -100,9 +100,9 @@ private:
     QVector<Projectile*> projectiles;
     /** 当前场景中所有活跃的简易子弹（1-2级红色椭圆） */
     QVector<SimpleProjectile*> simpleProjectiles;
-    /** 当前场景中所有活跃的蓝色月牙子弹（N键普攻2） */
+    /** 当前场景中所有活跃的冰魄八荒子弹（N键普攻2） */
     QVector<BlueProjectile*> blueProjectiles;
-    /** 当前场景中所有活跃的三角形子弹（H键单方向） */
+    /** 当前场景中所有活跃的破空梭（H键单方向） */
     QVector<TriangleProjectile*> triangleProjectiles;
     /** 当前场景中所有活跃的刀浪（1级矩形） */
     QVector<BladeWave*> bladeWaves;
@@ -120,39 +120,39 @@ private:
     int fireBgFrameIdx = 0;
     int fireBgTick = 0;
 
-    /** 技能一：粒子爆发（按 I 键触发，静止时才能使用） */
+    /** 技能一：天火燎原（按 I 键触发，静止时才能使用） */
     void skillMeteorBurst();
     /** 普攻2：蓝色八方向月牙子弹（按 N 键触发，可边移动边发射） */
     void skillBlueBurst();
-    /** 普攻3：单方向三角形子弹（按 H 键触发，朝移动方向） */
+    /** 普攻3：单方向破空梭（按 H 键触发，朝移动方向） */
     void skillTriangleShot();
     /** 每帧更新所有流星粒子（移动、碰撞、清理） */
     void updateProjectiles();
     /** 每帧更新所有简易子弹（移动、碰撞、清理） */
     void updateSimpleProjectiles();
-    /** 每帧更新所有蓝色月牙子弹（移动、碰撞、清理） */
+    /** 每帧更新所有冰魄八荒子弹（移动、碰撞、清理） */
     void updateBlueProjectiles();
-    /** 每帧更新所有三角形子弹（移动、碰撞、清理） */
+    /** 每帧更新所有破空梭（移动、碰撞、清理） */
     void updateTriangleProjectiles();
     /** 在指定位置创建爆炸动画（3x3 tile 大小） */
     void createExplosion(QPointF centerPos);
 
-    /** 技能二：闪现刀浪（按 K 键触发） */
+    /** 技能二：瞬影浪斩（按 K 键触发） */
     void skillFlashBlade();
     /** 每帧更新所有刀浪（移动、碰撞、清理） */
     void updateBladeWaves();
     /** 每帧更新所有GIF刀浪（移动、碰撞、清理） */
     void updateDaolangWaves();
 
-    /** 普攻：九宫格火光（按 J 键触发） */
+    /** 普攻：九重炎杀（按 J 键触发） */
     void skillNormalAttack();
 
-    /** 技能三：盾牌（按住 L 键激活，松开关闭） */
+    /** 技能三：玄武盾（按住 L 键激活，松开关闭） */
     void skillShieldActivate();
     void skillShieldDeactivate();
     void updateShieldPosition(); // 每帧跟随玩家
-    QGraphicsEllipseItem *shieldItem = nullptr; // 盾牌图形项
-    bool shieldActive = false;                  // 盾牌是否激活
+    QGraphicsEllipseItem *shieldItem = nullptr; // 玄武盾图形项
+    bool shieldActive = false;                  // 玄武盾是否激活
 
     /** 根据当前按键状态获取闪现/刀浪方向向量 */
     QPointF getCurrentDirectionVector();
