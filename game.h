@@ -18,6 +18,7 @@ class SimpleProjectile;
 class Enemy;
 class EnemyProjectile;
 class Spawner;
+class Pet;
 class QMovie;
 
 class Game : public QGraphicsView
@@ -90,6 +91,9 @@ private:
     void onPlayerLevelUp(int newLevel);
     void applyLevel10Enhancement();
     void playTransformAnimation(); // 3级变身动画
+
+    // ========== 宠物系统 ==========
+    Pet *pet = nullptr;
 
     // ========== 技能系统 ==========
     /** 当前场景中所有活跃的流星粒子 */

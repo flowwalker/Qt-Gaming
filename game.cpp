@@ -2,6 +2,7 @@
 #include "player.h"
 #include "tilemap.h"
 #include "spawner.h"
+#include "pet.h"
 #include <QDebug>
 #include <QGraphicsRectItem>
 #include <QFile>
@@ -51,7 +52,7 @@ namespace {
             QImage img = reader.read();
             if (!img.isNull()) {
                 g_fireBgFrames.append(QPixmap::fromImage(img).scaled(
-                    96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                    80, 80, Qt::KeepAspectRatio, Qt::SmoothTransformation));
             }
         }
         if (g_fireBgFrames.isEmpty()) {
@@ -111,6 +112,12 @@ Game::~Game()
     if (fireBgItem) {
         delete fireBgItem;
         fireBgItem = nullptr;
+    }
+
+    // 清理宠物
+    if (pet) {
+        delete pet;
+        pet = nullptr;
     }
 
     // 清理所有敌人
@@ -316,6 +323,22 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     player = new Player(tileMap);
     scene->addItem(player);
 
+    // 1级就显示背后火焰（调试用）
+    if (!fireBgItem && !g_fireBgFrames.isEmpty()) {
+        fireBgItem = new QGraphicsPixmapItem();
+        scene->addItem(fireBgItem);
+        fireBgItem->setTransformationMode(Qt::SmoothTransformation);
+        fireBgItem->setZValue(1);
+        fireBgItem->setPixmap(g_fireBgFrames[0]);
+    }
+
+    // 创建宠物
+    if (!pet) {
+        pet = new Pet(scene, tileMap);
+        pet->setPos(tileMap->getPlayerStart() + QPointF(40, 0));
+        if (player) pet->stackBefore(player); // 画在主角后面，地板上面
+    }
+
     // 创建巢穴（基于玩家出生点偏移，任何地图都合理）
     QPointF spawnBase = tileMap->getPlayerStart();
     if (spawnBase.isNull()) spawnBase = QPointF(100, 100);
@@ -433,6 +456,12 @@ void Game::updateGame()
             QPointF bladeVelocity(flashState.bladeDir.x() * bladeSpeed, flashState.bladeDir.y() * bladeSpeed);
             BladeWave *bw = new BladeWave(bladeStart, bladeVelocity, damage, tileMap, scene);
             bladeWaves.append(bw);
+
+            // 闪现后检查宠物距离，超出则重置
+            if (pet) {
+                qreal dist = QLineF(pet->pos(), player->pos()).length();
+                if (dist > 160.0) pet->resetToOwner(player->pos());
+            }
         }
         centerOn(player);
     }
@@ -456,12 +485,16 @@ void Game::updateGame()
     updateBladeWaves();        // ← 更新所有刀浪
     updateShieldPosition();    // ← 更新盾牌跟随玩家
 
-    // 更新背后火焰（5级启用）
-    if (fireBgEnabled && fireBgItem && player) {
-        QRectF playerRect = player->sceneBoundingRect();
-        fireBgItem->setPos(playerRect.center().x() - 48, playerRect.center().y() - 48);
+    // 更新宠物
+    if (pet && player) {
+        pet->update(player->pos());
+    }
+
+    // 更新背后火焰动画和位置
+    if (fireBgItem && player && !g_fireBgFrames.isEmpty()) {
+        fireBgItem->setPos(player->pos() + QPointF(-8, -8));
         fireBgTick++;
-        if (fireBgTick >= 2) {
+        if (fireBgTick >= 3) {
             fireBgTick = 0;
             fireBgFrameIdx = (fireBgFrameIdx + 1) % g_fireBgFrames.size();
             fireBgItem->setPixmap(g_fireBgFrames[fireBgFrameIdx]);
@@ -498,6 +531,11 @@ void Game::skillMeteorBurst()
 {
     if (!player) return;
     if (!player->consumeMp(10)) return; // 消耗 10 MP，不足则无法释放
+
+    // 变身形态下播放飞火施法动画
+    if (player->getEnhanced()) {
+        player->playCastAnimation(":/images/player_enhanced_fly_fire.gif");
+    }
 
     // 以玩家中心为发射原点
     QPointF center = player->sceneBoundingRect().center();
@@ -681,7 +719,33 @@ void Game::skillFlashBlade()
     // 把玩家位置恢复为 oldPos，由 updateGame 中的闪现动画逐步移动
     player->setPos(oldPos);
 
-    // ========== 3. 设置跨帧闪现状态 ==========
+    // ========== 3. 变身后伴随普攻动画 ==========
+    if (player->getEnhanced()) {
+        QMovie *pugongMovie = new QMovie(":/images/player_enhanced_K.gif");
+        QGraphicsPixmapItem *pugongItem = new QGraphicsPixmapItem();
+        scene->addItem(pugongItem);
+        pugongItem->setTransformationMode(Qt::SmoothTransformation);
+        pugongItem->setZValue(50);
+        pugongItem->setPos(player->pos() + QPointF(32, 32)); // 玩家中心
+
+        connect(pugongMovie, &QMovie::frameChanged, [this, pugongItem, pugongMovie](int frame) {
+            QPixmap pixmap = pugongMovie->currentPixmap();
+            if (!pixmap.isNull()) {
+                pixmap = pixmap.scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                pugongItem->setPixmap(pixmap);
+                pugongItem->setOffset(-pixmap.width() / 2.0, -pixmap.height() / 2.0);
+            }
+            if (frame >= pugongMovie->frameCount() - 1) {
+                pugongMovie->stop();
+                if (pugongItem->scene()) scene->removeItem(pugongItem);
+                delete pugongItem;
+                pugongMovie->deleteLater();
+            }
+        });
+        pugongMovie->start();
+    }
+
+    // ========== 4. 设置跨帧闪现状态 ==========
     const int FLASH_FRAMES = 5;
     flashState.active = true;
     flashState.step = (finalPos - oldPos) / FLASH_FRAMES;
@@ -724,6 +788,11 @@ void Game::updateBladeWaves()
 void Game::skillNormalAttack()
 {
     if (!player || !scene) return;
+
+    // 变身形态下播放普攻施法动画
+    if (player->getEnhanced()) {
+        player->playCastAnimation(":/images/player_enhanced_pugong.gif");
+    }
 
     // ========== 1. 九宫格攻击范围 ==========
     QPointF playerCenter = player->sceneBoundingRect().center();
@@ -986,17 +1055,9 @@ void Game::onPlayerLevelUp(int newLevel)
         playTransformAnimation();
     }
     if (newLevel == 5) {
-        // 5级：启用爆炸效果 + 背后火焰
+        // 5级：启用爆炸效果
         explosionsEnabled = true;
-        fireBgEnabled = true;
-        if (!fireBgItem && scene && !g_fireBgFrames.isEmpty()) {
-            fireBgItem = new QGraphicsPixmapItem();
-            fireBgItem->setTransformationMode(Qt::SmoothTransformation);
-            fireBgItem->setZValue(-1); // 在玩家背后
-            scene->addItem(fireBgItem);
-            fireBgItem->setPixmap(g_fireBgFrames[0]);
-        }
-        qDebug() << "Level 5: explosions and fire background enabled!";
+        qDebug() << "Level 5: explosions enabled!";
     }
 }
 
@@ -1131,6 +1192,11 @@ void Game::performTeleport(const Portal &portal)
                 break;
             }
         }
+        // 传送后宠物重置
+        if (pet) {
+            qreal dist = QLineF(pet->pos(), player->pos()).length();
+            if (dist > 160.0) pet->resetToOwner(player->pos());
+        }
         // 恢复冷却
         QTimer::singleShot(2000, this, [this]() {
             canTeleport = true;
@@ -1161,6 +1227,8 @@ void Game::performTeleport(const Portal &portal)
                 qDebug() << "Warning: target portal not found, and no start point.";
             }
         }
+        // 跨地图传送后宠物重置
+        if (pet) pet->resetToOwner(player->pos());
         // 跨地图冷却稍长
         QTimer::singleShot(5000, this, [this]() {
             canTeleport = true;

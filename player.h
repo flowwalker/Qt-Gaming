@@ -36,6 +36,8 @@ public:
 
     // ========== 形态切换 ==========
     void setEnhanced(bool enhanced);
+    bool getEnhanced() const { return isEnhanced; }
+    void playCastAnimation(const QString &gifPath); // 播放施法动画，播放完自动恢复
 
 signals:
     void levelUp(int newLevel);
@@ -61,6 +63,9 @@ private:
     bool facingRight = true;   // 当前朝向
     bool isRunning = false;    // 是否在跑动
     bool isEnhanced = false;   // 是否增强形态（10级）
+    bool isCasting = false;    // 是否正在播放施法动画
+    int castFrameCount = 0;    // 施法动画已播放帧数
+    int castFrameTarget = 0;   // 施法动画总帧数
     QString currentGifPath;    // 当前播放的 GIF 路径
 
     void updateAnimationState(bool moving, bool right);

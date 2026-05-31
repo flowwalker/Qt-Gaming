@@ -8,6 +8,7 @@
 Player::Player(TileMap *map, QGraphicsItem *parent)
     : QGraphicsPixmapItem(parent), tileMap(map), speed(4.0), movie(nullptr)
 {
+    setZValue(2); // 确保画在火焰背景(Z=1)和地板(Z=0)之上
     // 加载 idle GIF
     movie = new QMovie(":/images/player.gif");
     if (movie->isValid()) {
@@ -69,6 +70,10 @@ void Player::onFrameChanged(int frame)
 void Player::updateAnimationState(bool moving, bool right)
 {
     facingRight = right;
+    isRunning = moving;
+
+    // 施法期间不切换动画（但 isRunning 已更新，施法结束时会正确恢复）
+    if (isCasting) return;
 
     // 如果移动状态没变且朝向没变，无需切换
     if (isRunning == moving && facingRight == right && !currentGifPath.isEmpty()) {
@@ -83,8 +88,6 @@ void Player::updateAnimationState(bool moving, bool right)
         }
         if (currentGifPath == expectedPath) return;
     }
-
-    isRunning = moving;
 
     QString targetPath;
     if (moving) {
@@ -101,6 +104,12 @@ void Player::updateAnimationState(bool moving, bool right)
         movie->setFileName(targetPath);
         movie->start();
     }
+}
+
+void Player::playCastAnimation(const QString &gifPath)
+{
+    Q_UNUSED(gifPath);
+    // 暂时禁用，避免干扰正常动画
 }
 
 void Player::setEnhanced(bool enhanced)

@@ -12,7 +12,8 @@ SOURCES += \
     maploader.cpp \
     skill.cpp \
     enemy.cpp \
-    spawner.cpp
+    spawner.cpp \
+    pet.cpp
 
 HEADERS += \
     game.h \
@@ -22,6 +23,7 @@ HEADERS += \
     maploader.h \
     skill.h \
     enemy.h \
-    spawner.h
+    spawner.h \
+    pet.h
 
 CONFIG += console
