@@ -18,6 +18,12 @@ namespace {
     bool g_bombLoaded = false;
     QVector<QPixmap> g_fireBgFrames;
     bool g_fireBgLoaded = false;
+}
+
+QVector<QPixmap> g_daolangFrames;
+bool g_daolangLoaded = false;
+
+namespace {
 
     void loadBombFrames()
     {
@@ -59,6 +65,24 @@ namespace {
             qDebug() << "Failed to load player_background_fire.gif frames";
         }
     }
+
+    void loadDaolangFrames()
+    {
+        if (g_daolangLoaded) return;
+        g_daolangLoaded = true;
+        QImageReader reader(":/images/daolang_left.gif");
+        reader.setAutoDetectImageFormat(true);
+        while (reader.canRead()) {
+            QImage img = reader.read();
+            if (!img.isNull()) {
+                g_daolangFrames.append(QPixmap::fromImage(img).scaled(
+                    80, 80, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            }
+        }
+        if (g_daolangFrames.isEmpty()) {
+            qDebug() << "Failed to load daolang_left.gif frames";
+        }
+    }
 }
 
 Game::Game(QWidget *parent)
@@ -72,10 +96,11 @@ Game::Game(QWidget *parent)
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-    // 预加载 Projectile / Bomb / FireBg 帧缓存，避免首次释放技能时卡顿
+    // 预加载 Projectile / Bomb / FireBg / Daolang 帧缓存，避免首次释放技能时卡顿
     preloadProjectileFrames();
     loadBombFrames();
     loadFireBgFrames();
+    loadDaolangFrames();
 
     // 加载初始地图（使用 start 点）
     loadMap(":/maps/school_map.tmj", true);
@@ -95,11 +120,29 @@ Game::~Game()
     }
     simpleProjectiles.clear();
 
+    // 清理所有蓝色月牙子弹
+    for (BlueProjectile *bp : blueProjectiles) {
+        delete bp;
+    }
+    blueProjectiles.clear();
+
+    // 清理所有三角形子弹
+    for (TriangleProjectile *tp : triangleProjectiles) {
+        delete tp;
+    }
+    triangleProjectiles.clear();
+
     // 清理所有刀浪
     for (BladeWave *bw : bladeWaves) {
         delete bw;
     }
     bladeWaves.clear();
+
+    // 清理所有GIF刀浪
+    for (DaolangWave *dw : daolangWaves) {
+        delete dw;
+    }
+    daolangWaves.clear();
 
     // 清理盾牌
     if (shieldItem) {
@@ -394,7 +437,9 @@ void Game::keyPressEvent(QKeyEvent *event)
     case Qt::Key_S: downPressed = true; break;
     case Qt::Key_A: leftPressed = true; break;
     case Qt::Key_D: rightPressed = true; break;
-    case Qt::Key_I: skillMeteorBurst(); break;   // ← I键：粒子爆发技能（一技能）
+    case Qt::Key_I: skillMeteorBurst(); break;   // ← I键：粒子爆发技能（一技能，静止时才能使用）
+    case Qt::Key_H: skillTriangleShot(); break;  // ← H键：单方向三角形子弹（朝移动方向）
+    case Qt::Key_N: skillBlueBurst(); break;     // ← N键：普攻2（蓝色八方向月牙，可边移动边发射）
     case Qt::Key_J: skillNormalAttack(); break;  // ← J键：普攻（九宫格火光）
     case Qt::Key_K: skillFlashBlade(); break;    // ← K键：闪现刀浪技能（二技能）
     case Qt::Key_L: skillShieldActivate(); break;// ← L键：激活盾牌（三技能）
@@ -454,8 +499,16 @@ void Game::updateGame()
             QPointF bladeStart = player->sceneBoundingRect().center()
                                  + QPointF(flashState.bladeDir.x() * 20.0, flashState.bladeDir.y() * 20.0);
             QPointF bladeVelocity(flashState.bladeDir.x() * bladeSpeed, flashState.bladeDir.y() * bladeSpeed);
-            BladeWave *bw = new BladeWave(bladeStart, bladeVelocity, damage, tileMap, scene);
-            bladeWaves.append(bw);
+
+            if (player->getLevel() >= 2) {
+                // 2级+：使用GIF刀浪
+                DaolangWave *dw = new DaolangWave(bladeStart, bladeVelocity, damage, tileMap, scene);
+                daolangWaves.append(dw);
+            } else {
+                // 1级：矩形刀浪
+                BladeWave *bw = new BladeWave(bladeStart, bladeVelocity, damage, tileMap, scene);
+                bladeWaves.append(bw);
+            }
 
             // 闪现后检查宠物距离，超出则重置
             if (pet) {
@@ -468,6 +521,7 @@ void Game::updateGame()
     // 正常移动
     else if (player) {
         player->move(upPressed, downPressed, leftPressed, rightPressed);
+        player->updateCastAnimation(); // 更新施法动画（手动切帧）
         centerOn(player);
     }
 
@@ -480,9 +534,12 @@ void Game::updateGame()
         }
     }
 
-    updateProjectiles();       // ← 更新所有流星粒子
-    updateSimpleProjectiles(); // ← 更新所有简易子弹
-    updateBladeWaves();        // ← 更新所有刀浪
+    updateProjectiles();        // ← 更新所有流星粒子
+    updateSimpleProjectiles();  // ← 更新所有简易子弹
+    updateBlueProjectiles();    // ← 更新所有蓝色月牙子弹
+    updateTriangleProjectiles();// ← 更新所有三角形子弹
+    updateBladeWaves();         // ← 更新所有刀浪
+    updateDaolangWaves();       // ← 更新所有GIF刀浪
     updateShieldPosition();    // ← 更新盾牌跟随玩家
 
     // 更新宠物
@@ -492,7 +549,8 @@ void Game::updateGame()
 
     // 更新背后火焰动画和位置
     if (fireBgItem && player && !g_fireBgFrames.isEmpty()) {
-        fireBgItem->setPos(player->pos() + QPointF(-8, -8));
+        QRectF playerRect = player->sceneBoundingRect();
+        fireBgItem->setPos(playerRect.center() + QPointF(-40, -40));
         fireBgTick++;
         if (fireBgTick >= 3) {
             fireBgTick = 0;
@@ -532,9 +590,12 @@ void Game::skillMeteorBurst()
     if (!player) return;
     if (!player->consumeMp(10)) return; // 消耗 10 MP，不足则无法释放
 
-    // 变身形态下播放飞火施法动画
+    // I技能：不移动时才能使用
+    if (upPressed || downPressed || leftPressed || rightPressed) return;
+
+    // 变身形态下播放飞火施法动画（间隔1帧，更快）
     if (player->getEnhanced()) {
-        player->playCastAnimation(":/images/player_enhanced_fly_fire.gif");
+        player->playCastAnimation(":/images/player_enhanced_fly_fire.gif", 1);
     }
 
     // 以玩家中心为发射原点
@@ -566,6 +627,32 @@ void Game::skillMeteorBurst()
             SimpleProjectile *sp = new SimpleProjectile(center, dir, damage, tileMap, scene);
             simpleProjectiles.append(sp);
         }
+    }
+}
+
+void Game::skillBlueBurst()
+{
+    if (!player) return;
+
+    // H键：普攻2，蓝色八方向月牙子弹，可边移动边发射
+    QPointF center = player->sceneBoundingRect().center();
+    qreal speed = 8.0;
+    int damage = 15;           // 伤害略低于I技能
+
+    QVector<QPointF> directions = {
+        QPointF(0, -speed),
+        QPointF(speed * 0.707, -speed * 0.707),
+        QPointF(speed, 0),
+        QPointF(speed * 0.707, speed * 0.707),
+        QPointF(0, speed),
+        QPointF(-speed * 0.707, speed * 0.707),
+        QPointF(-speed, 0),
+        QPointF(-speed * 0.707, -speed * 0.707)
+    };
+
+    for (const QPointF &dir : directions) {
+        BlueProjectile *bp = new BlueProjectile(center, dir, damage, tileMap, scene);
+        blueProjectiles.append(bp);
     }
 }
 
@@ -631,6 +718,82 @@ void Game::updateSimpleProjectiles()
             simpleProjectiles.removeAt(i);
         }
     }
+}
+
+void Game::updateBlueProjectiles()
+{
+    // 倒序遍历，方便安全删除已死亡的蓝色月牙子弹
+    for (int i = blueProjectiles.size() - 1; i >= 0; --i) {
+        BlueProjectile *bp = blueProjectiles[i];
+        bool alive = bp->update();
+
+        // 检测是否击中可攻击对象
+        if (alive) {
+            for (QGraphicsItem *hittable : hittableItems) {
+                if (bp->collidesWithItem(hittable)) {
+                    Enemy *enemy = dynamic_cast<Enemy*>(hittable);
+                    if (enemy) {
+                        enemy->takeDamage(bp->getDamage());
+                    }
+                    qDebug() << "Blue crescent hit! Damage:" << bp->getDamage()
+                             << "to hittable object at" << hittable->pos();
+                    alive = false;
+                    break;
+                }
+            }
+        }
+
+        if (!alive) {
+            delete bp;
+            blueProjectiles.removeAt(i);
+        }
+    }
+}
+
+void Game::updateTriangleProjectiles()
+{
+    // 倒序遍历，方便安全删除已死亡的三角形子弹
+    for (int i = triangleProjectiles.size() - 1; i >= 0; --i) {
+        TriangleProjectile *tp = triangleProjectiles[i];
+        bool alive = tp->update();
+
+        // 检测是否击中可攻击对象
+        if (alive) {
+            for (QGraphicsItem *hittable : hittableItems) {
+                if (tp->collidesWithItem(hittable)) {
+                    Enemy *enemy = dynamic_cast<Enemy*>(hittable);
+                    if (enemy) {
+                        enemy->takeDamage(tp->getDamage());
+                    }
+                    qDebug() << "Triangle hit! Damage:" << tp->getDamage()
+                             << "to hittable object at" << hittable->pos();
+                    alive = false;
+                    break;
+                }
+            }
+        }
+
+        if (!alive) {
+            delete tp;
+            triangleProjectiles.removeAt(i);
+        }
+    }
+}
+
+void Game::skillTriangleShot()
+{
+    if (!player) return;
+
+    QPointF dir = getCurrentDirectionVector();
+    qreal speed = 10.0;
+    int damage = 45; // J技能伤害15的3倍
+
+    QPointF velocity(dir.x() * speed, dir.y() * speed);
+    QPointF start = player->sceneBoundingRect().center()
+                    + QPointF(dir.x() * 20.0, dir.y() * 20.0);
+
+    TriangleProjectile *tp = new TriangleProjectile(start, velocity, damage, tileMap, scene);
+    triangleProjectiles.append(tp);
 }
 
 void Game::createExplosion(QPointF centerPos)
@@ -781,6 +944,36 @@ void Game::updateBladeWaves()
         if (!alive) {
             delete bw;
             bladeWaves.removeAt(i);
+        }
+    }
+}
+
+void Game::updateDaolangWaves()
+{
+    // 倒序遍历，方便安全删除已死亡的GIF刀浪
+    for (int i = daolangWaves.size() - 1; i >= 0; --i) {
+        DaolangWave *dw = daolangWaves[i];
+        bool alive = dw->update();
+
+        // 检测是否击中可攻击对象
+        if (alive) {
+            for (QGraphicsItem *hittable : hittableItems) {
+                if (dw->collidesWithItem(hittable)) {
+                    Enemy *enemy = dynamic_cast<Enemy*>(hittable);
+                    if (enemy) {
+                        enemy->takeDamage(dw->getDamage());
+                    }
+                    qDebug() << "DaolangWave Hit! Damage:" << dw->getDamage()
+                             << "to hittable object at" << hittable->pos();
+                    alive = false;
+                    break;
+                }
+            }
+        }
+
+        if (!alive) {
+            delete dw;
+            daolangWaves.removeAt(i);
         }
     }
 }
@@ -1164,7 +1357,8 @@ void Game::performTeleport(const Portal &portal)
 
     // 辅助：安全传送到目标点（自动处理卡墙微调）
     auto safeTeleportTo = [&](const QPointF &target) {
-        QPointF basePos = target - QPointF(32, 32);
+        int halfSize = player->getDisplaySize() / 2;
+        QPointF basePos = target - QPointF(halfSize, halfSize);
         player->setPos(basePos);
         if (tileMap->collidesWithWall(player->hitboxRect())) {
             const QVector<QPointF> offsets = {

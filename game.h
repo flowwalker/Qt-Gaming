@@ -100,8 +100,14 @@ private:
     QVector<Projectile*> projectiles;
     /** 当前场景中所有活跃的简易子弹（1-2级红色椭圆） */
     QVector<SimpleProjectile*> simpleProjectiles;
-    /** 当前场景中所有活跃的刀浪 */
+    /** 当前场景中所有活跃的蓝色月牙子弹（N键普攻2） */
+    QVector<BlueProjectile*> blueProjectiles;
+    /** 当前场景中所有活跃的三角形子弹（H键单方向） */
+    QVector<TriangleProjectile*> triangleProjectiles;
+    /** 当前场景中所有活跃的刀浪（1级矩形） */
     QVector<BladeWave*> bladeWaves;
+    /** 当前场景中所有活跃的GIF刀浪（2级+） */
+    QVector<DaolangWave*> daolangWaves;
     /** 可被攻击的对象列表（Boss、小怪等），供碰撞检测使用 */
     QList<QGraphicsItem*> hittableItems;
 
@@ -114,12 +120,20 @@ private:
     int fireBgFrameIdx = 0;
     int fireBgTick = 0;
 
-    /** 技能一：粒子爆发（按 I 键触发） */
+    /** 技能一：粒子爆发（按 I 键触发，静止时才能使用） */
     void skillMeteorBurst();
+    /** 普攻2：蓝色八方向月牙子弹（按 N 键触发，可边移动边发射） */
+    void skillBlueBurst();
+    /** 普攻3：单方向三角形子弹（按 H 键触发，朝移动方向） */
+    void skillTriangleShot();
     /** 每帧更新所有流星粒子（移动、碰撞、清理） */
     void updateProjectiles();
     /** 每帧更新所有简易子弹（移动、碰撞、清理） */
     void updateSimpleProjectiles();
+    /** 每帧更新所有蓝色月牙子弹（移动、碰撞、清理） */
+    void updateBlueProjectiles();
+    /** 每帧更新所有三角形子弹（移动、碰撞、清理） */
+    void updateTriangleProjectiles();
     /** 在指定位置创建爆炸动画（3x3 tile 大小） */
     void createExplosion(QPointF centerPos);
 
@@ -127,6 +141,8 @@ private:
     void skillFlashBlade();
     /** 每帧更新所有刀浪（移动、碰撞、清理） */
     void updateBladeWaves();
+    /** 每帧更新所有GIF刀浪（移动、碰撞、清理） */
+    void updateDaolangWaves();
 
     /** 普攻：九宫格火光（按 J 键触发） */
     void skillNormalAttack();

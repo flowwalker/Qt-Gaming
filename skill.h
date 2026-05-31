@@ -52,8 +52,60 @@ class SimpleProjectile : public QObject, public QGraphicsEllipseItem
 public:
     SimpleProjectile(QPointF startPos, QPointF velocity, int damage,
                      TileMap *tileMap, QGraphicsScene *scene,
-                     QGraphicsItem *parent = nullptr);
+                     QGraphicsItem *parent = nullptr,
+                     const QColor &color = QColor(255, 60, 0),
+                     int radius = 6);
     ~SimpleProjectile();
+
+    bool update();
+    int getDamage() const { return damage; }
+
+private:
+    QPointF velocity;
+    int damage;
+    TileMap *tileMap;
+    QGraphicsScene *m_scene;
+    qreal distanceTraveled;
+    qreal maxDistance;
+};
+
+// ============================================================================
+//  三角形投射物（H键：单方向子弹）
+// ============================================================================
+
+class TriangleProjectile : public QObject, public QGraphicsPolygonItem
+{
+    Q_OBJECT
+public:
+    TriangleProjectile(QPointF startPos, QPointF velocity, int damage,
+                       TileMap *tileMap, QGraphicsScene *scene,
+                       QGraphicsItem *parent = nullptr);
+    ~TriangleProjectile();
+
+    bool update();
+    int getDamage() const { return damage; }
+
+private:
+    QPointF velocity;
+    int damage;
+    TileMap *tileMap;
+    QGraphicsScene *m_scene;
+    qreal distanceTraveled;
+    qreal maxDistance;
+};
+
+// ============================================================================
+//  蓝色月牙投射物（N键普攻2）
+// ============================================================================
+
+class BlueProjectile : public QObject, public QGraphicsPathItem
+{
+    Q_OBJECT
+public:
+    BlueProjectile(QPointF startPos, QPointF velocity, int damage,
+                   TileMap *tileMap, QGraphicsScene *scene,
+                   QGraphicsItem *parent = nullptr);
+    ~BlueProjectile();
 
     bool update();
     int getDamage() const { return damage; }
@@ -93,6 +145,34 @@ private:
     QGraphicsScene *m_scene;
     int maxDistance;
     qreal distanceTraveled;
+};
+
+// ============================================================================
+//  2级+ GIF刀浪（Daolang Wave）
+// ============================================================================
+
+class DaolangWave : public QObject, public QGraphicsPixmapItem
+{
+    Q_OBJECT
+public:
+    DaolangWave(QPointF startPos, QPointF velocity, int damage,
+                TileMap *tileMap, QGraphicsScene *scene,
+                QGraphicsItem *parent = nullptr);
+    ~DaolangWave();
+
+    bool update();
+    int getDamage() const { return damage; }
+
+private:
+    QPointF velocity;
+    int damage;
+    TileMap *tileMap;
+    QGraphicsScene *m_scene;
+    qreal distanceTraveled;
+    qreal maxDistance;
+    int frameIdx;
+    int frameTick;
+    bool facingRight;
 };
 
 #endif // SKILL_H

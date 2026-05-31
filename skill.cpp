@@ -180,7 +180,8 @@ bool Projectile::update()
 
 SimpleProjectile::SimpleProjectile(QPointF startPos, QPointF velocity, int damage,
                                    TileMap *tileMap, QGraphicsScene *scene,
-                                   QGraphicsItem *parent)
+                                   QGraphicsItem *parent,
+                                   const QColor &color, int radius)
     : QGraphicsEllipseItem(parent),
       velocity(velocity),
       damage(damage),
@@ -189,9 +190,9 @@ SimpleProjectile::SimpleProjectile(QPointF startPos, QPointF velocity, int damag
       distanceTraveled(0.0),
       maxDistance(400.0)
 {
-    setRect(-6, -6, 12, 12);
-    setBrush(QBrush(QColor(255, 60, 0, 220)));
-    setPen(QPen(QColor(255, 160, 0), 2));
+    setRect(-radius, -radius, radius * 2, radius * 2);
+    setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 220)));
+    setPen(QPen(QColor(qMin(color.red() + 80, 255), qMin(color.green() + 80, 255), qMin(color.blue() + 80, 255), 220), 2));
     setPos(startPos);
     if (scene) scene->addItem(this);
 }
@@ -201,6 +202,124 @@ SimpleProjectile::~SimpleProjectile()
 }
 
 bool SimpleProjectile::update()
+{
+    QPointF oldPos = pos();
+    setPos(oldPos + velocity);
+    distanceTraveled += QLineF(oldPos, pos()).length();
+
+    if (distanceTraveled >= maxDistance) {
+        return false;
+    }
+
+    if (tileMap && tileMap->collidesWithWall(this)) {
+        return false;
+    }
+
+    if (m_scene) {
+        QRectF sceneRect = m_scene->sceneRect();
+        if (!sceneRect.contains(pos())) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// ============================================================================
+//  三角形投射物（H键：单方向子弹）
+// ============================================================================
+
+TriangleProjectile::TriangleProjectile(QPointF startPos, QPointF velocity, int damage,
+                                       TileMap *tileMap, QGraphicsScene *scene,
+                                       QGraphicsItem *parent)
+    : QGraphicsPolygonItem(parent),
+      velocity(velocity),
+      damage(damage),
+      tileMap(tileMap),
+      m_scene(scene),
+      distanceTraveled(0.0),
+      maxDistance(400.0)
+{
+    QPolygonF triangle;
+    triangle << QPointF(14, 0) << QPointF(-7, -10) << QPointF(-7, 10);
+    setPolygon(triangle);
+    setBrush(QBrush(QColor(255, 200, 0, 220)));
+    setPen(QPen(QColor(255, 240, 100), 2));
+    setPos(startPos);
+
+    qreal angle = qAtan2(velocity.y(), velocity.x()) * 180.0 / M_PI;
+    setRotation(angle);
+
+    if (scene) scene->addItem(this);
+}
+
+TriangleProjectile::~TriangleProjectile()
+{
+}
+
+bool TriangleProjectile::update()
+{
+    QPointF oldPos = pos();
+    setPos(oldPos + velocity);
+    distanceTraveled += QLineF(oldPos, pos()).length();
+
+    if (distanceTraveled >= maxDistance) {
+        return false;
+    }
+
+    if (tileMap && tileMap->collidesWithWall(this)) {
+        return false;
+    }
+
+    if (m_scene) {
+        QRectF sceneRect = m_scene->sceneRect();
+        if (!sceneRect.contains(pos())) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// ============================================================================
+//  蓝色月牙投射物（N键普攻2）
+// ============================================================================
+
+BlueProjectile::BlueProjectile(QPointF startPos, QPointF velocity, int damage,
+                               TileMap *tileMap, QGraphicsScene *scene,
+                               QGraphicsItem *parent)
+    : QGraphicsPathItem(parent),
+      velocity(velocity),
+      damage(damage),
+      tileMap(tileMap),
+      m_scene(scene),
+      distanceTraveled(0.0),
+      maxDistance(400.0)
+{
+    // 月牙形状：大圆减去向左偏移的小圆，默认朝右开口
+    QPainterPath big;
+    big.addEllipse(-12, -12, 24, 24);
+    QPainterPath small;
+    small.addEllipse(-16, -9, 18, 18); // 圆心(-4,0)，半径9，向左偏移
+    QPainterPath crescent = big.subtracted(small);
+    setPath(crescent);
+
+    setBrush(QBrush(QColor(0, 140, 255, 220)));
+    setPen(QPen(QColor(100, 200, 255, 220), 2));
+    setPos(startPos);
+
+    // 根据速度方向旋转，使月牙始终朝飞行方向
+    qreal angle = qAtan2(velocity.y(), velocity.x()) * 180.0 / M_PI;
+    setRotation(angle);
+
+    if (scene) scene->addItem(this);
+}
+
+BlueProjectile::~BlueProjectile()
+{
+}
+
+bool BlueProjectile::update()
 {
     QPointF oldPos = pos();
     setPos(oldPos + velocity);
@@ -286,6 +405,80 @@ bool BladeWave::update()
         QRectF sceneRect = m_scene->sceneRect();
         if (!sceneRect.contains(pos())) {
             return false;
+        }
+    }
+
+    return true;
+}
+
+// ============================================================================
+//  2级+ GIF刀浪（Daolang Wave）
+// ============================================================================
+
+extern QVector<QPixmap> g_daolangFrames;
+
+DaolangWave::DaolangWave(QPointF startPos, QPointF velocity, int damage,
+                         TileMap *tileMap, QGraphicsScene *scene,
+                         QGraphicsItem *parent)
+    : QGraphicsPixmapItem(parent),
+      velocity(velocity),
+      damage(damage),
+      tileMap(tileMap),
+      m_scene(scene),
+      distanceTraveled(0.0),
+      maxDistance(400.0),
+      frameIdx(0),
+      frameTick(0)
+{
+    setTransformationMode(Qt::SmoothTransformation);
+    setPos(startPos);
+
+    if (!g_daolangFrames.isEmpty()) {
+        QPixmap frame = g_daolangFrames[0];
+        setPixmap(frame);
+        setOffset(-frame.width() / 2.0, -frame.height() / 2.0);
+        setTransformOriginPoint(frame.width() / 2.0, frame.height() / 2.0);
+    }
+
+    // 八方向旋转：GIF默认朝左（180°），旋转到速度方向
+    qreal velocityAngle = qAtan2(velocity.y(), velocity.x()) * 180.0 / M_PI;
+    setRotation(velocityAngle - 180.0);
+
+    if (scene) scene->addItem(this);
+}
+
+DaolangWave::~DaolangWave()
+{
+}
+
+bool DaolangWave::update()
+{
+    QPointF oldPos = pos();
+    setPos(oldPos + velocity);
+    distanceTraveled += QLineF(oldPos, pos()).length();
+
+    if (distanceTraveled >= maxDistance) {
+        return false;
+    }
+
+    if (tileMap && tileMap->collidesWithWall(this)) {
+        return false;
+    }
+
+    if (m_scene) {
+        QRectF sceneRect = m_scene->sceneRect();
+        if (!sceneRect.contains(pos())) {
+            return false;
+        }
+    }
+
+    // 手动切换GIF帧
+    if (!g_daolangFrames.isEmpty()) {
+        frameTick++;
+        if (frameTick >= 2) {
+            frameTick = 0;
+            frameIdx = (frameIdx + 1) % g_daolangFrames.size();
+            setPixmap(g_daolangFrames[frameIdx]);
         }
     }
 

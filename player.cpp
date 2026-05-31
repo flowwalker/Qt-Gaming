@@ -4,6 +4,7 @@
 #include <QDebug>
 #include <QMovie>
 #include <QTransform>
+#include <QImageReader>
 
 Player::Player(TileMap *map, QGraphicsItem *parent)
     : QGraphicsPixmapItem(parent), tileMap(map), speed(4.0), movie(nullptr)
@@ -60,10 +61,11 @@ void Player::onFrameChanged(int frame)
 
     setPixmap(framePixmap);
 
-    // 保持 64x64 的显示大小
+    // 根据等级调整显示大小：1级32×32，2级+64×64
+    int targetSize = (level <= 1) ? 32 : 64;
     QSize origSize = framePixmap.size();
-    qreal sx = 64.0 / origSize.width();
-    qreal sy = 64.0 / origSize.height();
+    qreal sx = (qreal)targetSize / origSize.width();
+    qreal sy = (qreal)targetSize / origSize.height();
     setTransform(QTransform::fromScale(sx, sy));
 }
 
@@ -106,10 +108,54 @@ void Player::updateAnimationState(bool moving, bool right)
     }
 }
 
-void Player::playCastAnimation(const QString &gifPath)
+void Player::playCastAnimation(const QString &gifPath, int frameInterval)
 {
-    Q_UNUSED(gifPath);
-    // 暂时禁用，避免干扰正常动画
+    if (!isEnhanced || isCasting || !movie) return;
+
+    // 预加载所有帧到内存
+    castFrames.clear();
+    QImageReader reader(gifPath);
+    reader.setAutoDetectImageFormat(true);
+    while (reader.canRead()) {
+        QImage img = reader.read();
+        if (!img.isNull()) {
+            castFrames.append(QPixmap::fromImage(img).scaled(
+                64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
+    }
+    if (castFrames.isEmpty()) return;
+
+    isCasting = true;
+    castFrameIdx = 0;
+    castFrameTick = 0;
+    castFrameInterval = qMax(1, frameInterval);
+    movie->stop(); // 暂停正常动画
+}
+
+void Player::updateCastAnimation()
+{
+    if (!isCasting || castFrames.isEmpty()) return;
+
+    // 每帧都更新显示（处理转身翻转）
+    QPixmap frame = castFrames[castFrameIdx];
+    if (!facingRight) {
+        frame = frame.transformed(QTransform::fromScale(-1, 1), Qt::SmoothTransformation);
+    }
+    setPixmap(frame);
+    setTransform(QTransform()); // 帧已缩放到 64x64，无需额外变换
+
+    castFrameTick++;
+    if (castFrameTick >= castFrameInterval) {
+        castFrameTick = 0;
+        castFrameIdx++;
+        if (castFrameIdx >= castFrames.size()) {
+            // 播放完毕，恢复原有动画
+            isCasting = false;
+            castFrames.clear();
+            currentGifPath.clear();
+            updateAnimationState(isRunning, facingRight);
+        }
+    }
 }
 
 void Player::setEnhanced(bool enhanced)
@@ -190,6 +236,7 @@ void Player::addExp(int amount)
         hp = maxHp;
         mp = maxMp;
         emit levelUp(level);
+        onFrameChanged(0); // 强制刷新显示大小
         qDebug() << "Level up! New level:" << level
                  << "HP:" << hp << "/" << maxHp
                  << "MP:" << mp << "/" << maxMp
