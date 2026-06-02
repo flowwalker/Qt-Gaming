@@ -201,6 +201,7 @@ Game::~Game()
     for (auto *s : portalSprites) { delete s; }
     portalSprites.clear();
     if (buffIndicator) { delete buffIndicator; buffIndicator = nullptr; }
+    if (bgOverlay) { delete bgOverlay; bgOverlay = nullptr; }
 
     delete tileMap;
     delete player;
@@ -330,6 +331,7 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     for (auto *s : portalSprites) { delete s; }
     portalSprites.clear();
     if (buffIndicator) { delete buffIndicator; buffIndicator = nullptr; }
+    if (bgOverlay) { delete bgOverlay; bgOverlay = nullptr; }
 
     // 清空可攻击对象列表
     hittableItems.clear();
@@ -532,8 +534,19 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                                 finalPath = (r == 0) ? ":/images/floor_wood_1.png" : ":/images/floor_wood_2.png";
                             }
                         }
+                        else if (layerName == "floor_onfire") {
+                            if (mapFilePath.contains("Weiming_lake")) {
+                                int r = QRandomGenerator::global()->bounded(2);
+                                finalPath = (r == 0) ? ":/images/floor_road_f_1.png" : ":/images/floor_road_f_2.png";
+                            } else {
+                                finalPath = ":/images/floor_road_f_1.png";
+                            }
+                        }
                         else if (layerName == "floor_road") {
-                            if (mapFilePath.contains("chamber1")) {
+                            if (mapFilePath.contains("Weiming_lake")) {
+                                int r = QRandomGenerator::global()->bounded(2);
+                                finalPath = (r == 0) ? ":/images/floor_road_d_1.png" : ":/images/floor_road_d_2.png";
+                            } else if (mapFilePath.contains("chamber1")) {
                                 finalPath = ":/images/floor_road_3.png";
                             } else {
                                 int r = QRandomGenerator::global()->bounded(2);
@@ -541,9 +554,13 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                             }
                         }
                         else if (layerName == "floor_room") {
-                            if (mapFilePath.contains("chamber1")) {
+                            if (mapFilePath.contains("Weiming_lake")) {
+                                int r = QRandomGenerator::global()->bounded(100);
+                                finalPath = (r < 90) ? ":/images/floor_room_d_1.png"
+                                                      : ":/images/floor_room_d_2.png";
+                            } else if (mapFilePath.contains("chamber1")) {
                                 int r = QRandomGenerator::global()->bounded(2);
-                                finalPath = (r == 0) ? ":/images/floor_wood_1.png" : ":/images/floor_wood_2.png";
+                                finalPath = (r == 0) ? ":/images/floor_wood_3.png" : ":/images/floor_wood_4.png";
                             } else {
                                 finalPath = ":/images/floor_room_1.png";
                             }
@@ -579,14 +596,28 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                                 }
                             }
                         }
+                        else if (layerName == "stair_h") {
+                            finalPath = ":/images/stair_h.png";
+                        }
+                        else if (layerName == "stair_c1") {
+                            finalPath = ":/images/stair_c1.png";
+                        }
+                        else if (layerName == "stair_c2") {
+                            finalPath = ":/images/stair_c2.png";
+                        }
                         else if (layerName == "grass" || layerName == "grassland") {
-                            int r = QRandomGenerator::global()->bounded(100);
-                            if (r < 85) {
-                                finalPath = ":/images/grass_1.png";
-                            } else if (r < 92) {
-                                finalPath = ":/images/grass_2.png";
+                            if (mapFilePath.contains("Weiming_lake")) {
+                                int r = QRandomGenerator::global()->bounded(2);
+                                finalPath = (r == 0) ? ":/images/grass_d_1.png" : ":/images/grass_d_2.png";
                             } else {
-                                finalPath = ":/images/grass_3.png";
+                                int r = QRandomGenerator::global()->bounded(100);
+                                if (r < 85) {
+                                    finalPath = ":/images/grass_1.png";
+                                } else if (r < 92) {
+                                    finalPath = ":/images/grass_2.png";
+                                } else {
+                                    finalPath = ":/images/grass_3.png";
+                                }
                             }
                         }
                         // 宝箱图层：加入 chests 列表
@@ -652,9 +683,9 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                         // 草(-4) → 水(-3) → 路(-2) → 墙(-1) → 装饰(0)
                         if (layerName == "grass" || layerName == "grassland") {
                             tile->setZValue(-4);
-                        } else if (layerName == "floor" || layerName == "floor_road" || layerName == "floor_room") {
+                        } else if (layerName == "floor" || layerName == "floor_road" || layerName == "floor_room" || layerName == "floor_onfire") {
                             tile->setZValue(-2);
-                        } else if (layerName == "wall") {
+                        } else if (layerName == "wall" || layerName == "door" || layerName == "stair_h" || layerName == "stair_c1" || layerName == "stair_c2") {
                             tile->setZValue(-1);
                         } else {
                             tile->setZValue(0);
@@ -730,6 +761,34 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
         file.close();
     } else {
         qDebug() << "[ManualDraw] Cannot open map file for manual drawing:" << mapFilePath;
+    }
+
+    // ---------- 3.5 主地图背景叠加（school_map 专用）----------
+    if (mapFilePath.contains("school_map")) {
+        QPixmap left(":/images/try_background_left.png");
+        QPixmap right(":/images/try_background_right.png");
+        if (!left.isNull() && !right.isNull()) {
+            int totalW = left.width() + right.width();
+            int totalH = qMax(left.height(), right.height());
+            QPixmap stitched(totalW, totalH);
+            stitched.fill(Qt::transparent);
+            QPainter p(&stitched);
+            p.drawPixmap(0, 0, left);
+            p.drawPixmap(left.width(), 0, right);
+            p.end();
+
+            int mapW = tileMap->getMapWidth() * tileMap->getTileWidth();
+            int mapH = tileMap->getMapHeight() * tileMap->getTileHeight();
+            QPixmap scaled = stitched.scaled(mapW, mapH, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+
+            bgOverlay = new QGraphicsPixmapItem();
+            bgOverlay->setPixmap(scaled);
+            bgOverlay->setZValue(-0.5);  // 在地板(-2)/墙(-1)之上，装饰(0)之下
+            bgOverlay->setTransformationMode(Qt::SmoothTransformation);
+            bgOverlay->setCacheMode(QGraphicsItem::DeviceCoordinateCache);  // 缩放时重新渲染保持清晰
+            scene->addItem(bgOverlay);
+            qDebug() << "[loadMap] Background overlay created:" << mapW << "x" << mapH;
+        }
     }
 
     // ---------- 4. 创建玩家 ----------
@@ -1916,7 +1975,7 @@ void Game::spawnArrivalEffect(QPointF center)
         auto *timer = new QTimer(this);
         int *step = new int(0);
         qreal startY = line->y();
-        connect(timer, &QTimer::timeout, [timer, line, step, startY, steps, duration]() {
+        connect(timer, &QTimer::timeout, [timer, line, step, startY, steps]() {
             (*step)++;
             qreal t = (qreal)(*step) / steps;
             line->setY(startY + t * 40);  // 向下移动

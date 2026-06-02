@@ -20,6 +20,8 @@
         <file>images/player.png</file>
         <file>images/portal.png</file>
         <file>images/shikongxuanwo.png</file>
+        <file>images/try_background_left.png</file>
+        <file>images/try_background_right.png</file>
         <file>images/wall.png</file>
         <file>images/wall_1.png</file>
         <file>images/wall_2.png</file>
@@ -59,6 +61,24 @@
         <file>images/grass_1.png</file>
         <file>images/grass_2.png</file>
         <file>images/grass_3.png</file>
+        <file>images/grass_d_1.png</file>
+        <file>images/grass_d_2.png</file>
+        <file>images/floor_road_d_1.png</file>
+        <file>images/floor_road_d_2.png</file>
+        <file>images/floor_road_f_1.png</file>
+        <file>images/floor_road_f_2.png</file>
+        <file>images/floor_room_d_1.png</file>
+        <file>images/floor_room_d_2.png</file>
+        <file>images/stair_1.png</file>
+        <file>images/stair_2.png</file>
+        <file>images/stair_h.png</file>
+        <file>images/stair_c1.png</file>
+        <file>images/stair_c2.png</file>
+        <file>images/wall_crack.png</file>
+        <file>images/wall_d_1.png</file>
+        <file>images/wall_d_2.png</file>
+        <file>images/wall_d_3.png</file>
+        <file>images/wall_d_down.png</file>
         <file>images/water.png</file>
         <file>images/water_1.png</file>
         <file>images/water_2.png</file>

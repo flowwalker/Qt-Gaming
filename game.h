@@ -221,6 +221,9 @@ private:
     /** 移除与指定门瓦片相连的所有门区域（BFS） */
     int removeDoorRegion(Tile *startDoor);
 
+    // ========== 主地图背景叠加 ==========
+    QGraphicsPixmapItem *bgOverlay = nullptr;
+
     // ========== 旋转传送门 ==========
     QVector<QGraphicsPixmapItem*> portalSprites;
     int portalRotTick = 0;
