@@ -267,6 +267,20 @@ void Player::reset()
     qDebug() << "Player reset to level 1, HP/MP full.";
 }
 
+void Player::setLevel(int lvl)
+{
+    if (lvl < 1) lvl = 1; if (lvl > 20) lvl = 20;
+    level = lvl;
+    maxExp = 100;
+    for (int i = 1; i < lvl; i++) maxExp = static_cast<int>(maxExp * 1.2);
+    exp = 0;
+    maxHp = 100; maxMp = 100;
+    for (int i = 1; i < lvl; i++) { maxHp = static_cast<int>(maxHp * 1.5); maxMp = static_cast<int>(maxMp * 1.5); }
+    hp = maxHp; mp = maxMp;
+    onFrameChanged(0);
+    qDebug() << "Admin: set level" << lvl << "HP:" << hp << "MP:" << mp;
+}
+
 void Player::restoreState(int lvl, int e, int maxE, int h, int maxH, int m, int maxM, bool enhanced)
 {
     level = lvl;

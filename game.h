@@ -63,8 +63,8 @@ private:
     // 视野缩放
     qreal zoomLevel = 1.0;
     static constexpr qreal ZOOM_STEP = 1.15;
-    static constexpr qreal MIN_ZOOM = 0.3;
-    static constexpr qreal MAX_ZOOM = 4.0;
+    static constexpr qreal MIN_ZOOM = 0.1;   // 可看到整张地图
+    static constexpr qreal MAX_ZOOM = 6.0;
     void applyZoom();
 
     // 闪现动画状态
@@ -161,6 +161,17 @@ private:
     int stunTimer = 0;
     static const int STUN_DURATION = 12;  // 0.2秒 (60fps × 0.2)
 
+    // ========== 加速技能 O ==========
+    int speedBoostTimer = 0;
+    int speedCooldownTimer = 0;
+    static const int SPEED_BOOST_DURATION = 300;   // 5s
+    static const int SPEED_COOLDOWN = 300;         // 5s
+
+    // ========== 管理员模式 ==========
+    bool adminMode = false;
+    QString keyBuffer;
+    void processAdminKey(int key);
+
     // ========== 钻石系统 ==========
     struct Diamond {
         QGraphicsPixmapItem *item = nullptr;
@@ -220,6 +231,21 @@ private:
 
     /** 移除与指定门瓦片相连的所有门区域（BFS） */
     int removeDoorRegion(Tile *startDoor);
+
+    // ========== 梅花瓣粒子 ==========
+    struct Petal {
+        QGraphicsEllipseItem *item;
+        qreal vx, vy;     // 速度
+        qreal rotation;    // 当前角度
+        int life;
+    };
+    QVector<Petal> petals;
+    void updatePetals();
+
+    // ========== 动态水 ==========
+    QVector<Tile*> animatedWaterTiles;
+    int waterFrameIdx = 0;
+    int waterFrameTick = 0;
 
     // ========== 主地图背景叠加 ==========
     QGraphicsPixmapItem *bgOverlay = nullptr;

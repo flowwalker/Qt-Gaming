@@ -39,6 +39,9 @@ public:
     int getExp() const { return exp; }
     int getMaxExp() const { return maxExp; }
     int getLevel() const { return level; }
+    void setSpeed(qreal s) { speed = s; }
+    qreal getSpeed() const { return speed; }
+    void setLevel(int lvl);  // 管理员直接设级
 
     // ========== 形态切换 ==========
     void setEnhanced(bool enhanced);

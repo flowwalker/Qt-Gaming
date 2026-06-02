@@ -6,6 +6,7 @@
 #include <QDebug>
 #include <QGraphicsRectItem>
 #include <QFile>
+#include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -26,6 +27,23 @@ namespace {
 
 QVector<QPixmap> g_daolangFrames;
 bool g_daolangLoaded = false;
+
+// 动态水帧缓存
+static QVector<QPixmap> g_waterFrames;
+static bool g_waterLoaded = false;
+
+static void preloadWaterFrames() {
+    if (g_waterLoaded) return;
+    g_waterLoaded = true;
+    for (int i = 0; i < 40; i++) {
+        QString path = QString(":/images/water/%1.png").arg(i, 4, 10, QChar('0'));
+        QPixmap pm(path);
+        if (!pm.isNull()) {
+            g_waterFrames.append(pm.scaled(32, 32, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
+    }
+    qDebug() << "preloadWaterFrames: loaded" << g_waterFrames.size() << "frames";
+}
 
 namespace {
 
@@ -96,9 +114,11 @@ Game::Game(QWidget *parent)
 {
     scene = new QGraphicsScene(this);
     setScene(scene);
-    setFixedSize(800, 600);
+    resize(800, 600);                      // 初始大小，可拖动缩放
+    setMinimumSize(400, 300);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setWindowTitle("Qt-Gaming");
 
     // 预加载 Projectile / Bomb / FireBg / Daolang / Monster 帧缓存
     preloadProjectileFrames();
@@ -106,6 +126,7 @@ Game::Game(QWidget *parent)
     loadFireBgFrames();
     loadDaolangFrames();
     preloadMonsterFrames();
+    preloadWaterFrames();
 
     // 加载初始地图（使用 start 点）
     loadMap(":/maps/school_map.tmj", true);
@@ -304,6 +325,9 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     }
     gamePaused = false;  // 解除变身动画的暂停状态
     stunTimer = 0;       // 清除定身状态
+    animatedWaterTiles.clear();
+    for (auto &p : petals) { if (p.item) delete p.item; }
+    petals.clear();
 
     // 清理背后火焰
     if (fireBgItem) {
@@ -391,9 +415,6 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
             int tileWidth = root["tilewidth"].toInt();
             int tileHeight = root["tileheight"].toInt();
 
-            // 收集传送门瓦片位置（稍后统一替换成旋转漩涡）
-            QSet<QPair<int,int>> portalPositions;
-
             // 图层名 -> 图片路径映射（为所有图层提供默认图片）
             QMap<QString, QString> layerImageMap;
             // 通用装饰层
@@ -430,6 +451,8 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                             int rawGid = dataArr[y * mapWidth + x].toInt();
                             int cleanGid = rawGid & 0x1FFFFFFF;
                             if (cleanGid == 0) continue;
+                            // 只取 30%，减少地图固定怪物密度
+                            if (QRandomGenerator::global()->bounded(100) >= 30) continue;
                             Enemy *enemy = new Enemy(tileMap, scene,
                                                      QPointF(x * tileWidth, y * tileHeight),
                                                      this);
@@ -476,9 +499,13 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                             }
 
                             Tile *waterTile = new Tile(waterPath, x * tileWidth, y * tileHeight, QSize(tileWidth, tileHeight));
-                            waterTile->setZValue(-3);  // 水：草(-4)之上，路(-2)之下
+                            waterTile->setZValue(-3);
                             scene->addItem(waterTile);
                             waterTiles.append(waterTile);
+                            // Weiming_lake 的水用动态帧
+                            if (isWeimingLake && !g_waterFrames.isEmpty()) {
+                                animatedWaterTiles.append(waterTile);
+                            }
                             waterCount++;
                         }
                     }
@@ -662,11 +689,10 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                             tileCount++;
                             continue;
                         }
-                        // 传送门图层：记录位置，稍后统一替换成旋转漩涡
+                        // 传送门图层：跳过（用 objectgroup rect 的漩涡替代）
                         else if (layerName == "portal" || layerName == "portal_image") {
-                            portalPositions.insert({x, y});
                             tileCount++;
-                            continue;  // 跳过 Tile 创建
+                            continue;
                         }
                         // 其他图层：从映射表获取或使用默认图片
                         else {
@@ -708,53 +734,21 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                 qDebug() << "[ManualDraw] Layer" << layerName << "drew" << tileCount << "tiles";
             }
 
-            // ===== 传送门替换：连通区域 → 旋转 shikongxuanwo.png =====
-            if (!portalPositions.isEmpty()) {
-                QSet<QPair<int,int>> visited;
-                for (const auto &start : portalPositions) {
-                    if (visited.contains(start)) continue;
-                    // BFS 找连通区域
-                    QVector<QPair<int,int>> region;
-                    QQueue<QPair<int,int>> queue;
-                    queue.enqueue(start);
-                    visited.insert(start);
-                    while (!queue.isEmpty()) {
-                        auto p = queue.dequeue();
-                        region.append(p);
-                        QPair<int,int> neighbors[4] = {
-                            {p.first+1, p.second}, {p.first-1, p.second},
-                            {p.first, p.second+1}, {p.first, p.second-1}
-                        };
-                        for (const auto &n : neighbors) {
-                            if (portalPositions.contains(n) && !visited.contains(n)) {
-                                visited.insert(n);
-                                queue.enqueue(n);
-                            }
-                        }
-                    }
-                    // 计算包围盒
-                    int minX = 999999, minY = 999999, maxX = -1, maxY = -1;
-                    for (const auto &p : region) {
-                        minX = qMin(minX, p.first); maxX = qMax(maxX, p.first);
-                        minY = qMin(minY, p.second); maxY = qMax(maxY, p.second);
-                    }
-                    int cols = maxX - minX + 1;
-                    int rows = maxY - minY + 1;
-                    int size = qMax(cols, rows) * tileWidth;
-
-                    auto *sprite = new QGraphicsPixmapItem();
-                    QPixmap pm(":/images/shikongxuanwo.png");
-                    pm = pm.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-                    sprite->setPixmap(pm);
-                    sprite->setTransformOriginPoint(size/2.0, size/2.0);
-                    sprite->setPos(minX * tileWidth, minY * tileHeight);
-                    sprite->setZValue(4);
-                    sprite->setTransformationMode(Qt::SmoothTransformation);
-                    scene->addItem(sprite);
-                    portalSprites.append(sprite);
-                }
-                qDebug() << "[Portal] Created" << portalSprites.size() << "rotating portal sprites";
+            // ===== 传送门替换：用 objectgroup 的 rect 创建旋转 shikongxuanwo.png =====
+            for (const Portal &p : tileMap->getPortals()) {
+                int size = qMax((int)p.rect.width(), (int)p.rect.height());
+                auto *sprite = new QGraphicsPixmapItem();
+                QPixmap pm(":/images/shikongxuanwo.png");
+                pm = pm.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                sprite->setPixmap(pm);
+                sprite->setTransformOriginPoint(size/2.0, size/2.0);
+                sprite->setPos(p.rect.x(), p.rect.y());
+                sprite->setZValue(4);
+                sprite->setTransformationMode(Qt::SmoothTransformation);
+                scene->addItem(sprite);
+                portalSprites.append(sprite);
             }
+            qDebug() << "[Portal] Created" << portalSprites.size() << "rotating portal sprites from objectgroup";
         } else {
             qDebug() << "[ManualDraw] Failed to parse JSON for manual drawing:" << mapFilePath;
         }
@@ -826,12 +820,34 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     if (player) pet->stackBefore(player);
     qDebug() << "[loadMap] Pet created at position:" << pet->pos();
 
-    // ---------- 7. 创建巢穴（基于玩家出生点）----------
+    // ---------- 7. 创建巢穴（基于玩家出生点 + 边界检查）----------
     QPointF spawnBase = playerStart;
     if (spawnBase.isNull()) spawnBase = QPointF(100, 100);
-    spawners.append(new Spawner(tileMap, scene, spawnBase + QPointF(300, 100), this));
-    spawners.append(new Spawner(tileMap, scene, spawnBase + QPointF(-100, 300), this));
-    spawners.append(new Spawner(tileMap, scene, spawnBase + QPointF(-200, -100), this));
+    int ts = tileMap->getTileWidth();
+    int mapW = tileMap->getMapWidth() * ts;
+    int mapH = tileMap->getMapHeight() * ts;
+
+    // 安全放置函数：夹在可行走区域内
+    auto safeSpawn = [&](QPointF pos) -> QPointF {
+        pos.setX(qBound(ts * 2.0, pos.x(), mapW - ts * 3.0));
+        pos.setY(qBound(ts * 2.0, pos.y(), mapH - ts * 3.0));
+        // 尝试偏移直到不撞墙/水
+        for (int dy = -3; dy <= 3; dy++) {
+            for (int dx = -3; dx <= 3; dx++) {
+                QPointF test(pos.x() + dx * ts, pos.y() + dy * ts);
+                QRectF tr(test.x(), test.y(), 40, 40);
+                if (!tileMap->collidesWithWall(tr) && !tileMap->collidesWithWater(tr))
+                    return test;
+            }
+        }
+        return pos;  // 实在找不到就返回夹紧位置
+    };
+
+    QPointF offsets[] = {{476, 100}, {76, 300}};
+    for (auto &off : offsets) {
+        QPointF sp = safeSpawn(spawnBase + QPointF(off.x(), off.y()));
+        spawners.append(new Spawner(tileMap, scene, sp, this));
+    }
     qDebug() << "[loadMap] 3 spawners created.";
 
     // ---------- 8. 连接玩家升级信号 ----------
@@ -897,6 +913,41 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
 
 void Game::keyPressEvent(QKeyEvent *event)
 {
+    // ========== 管理员模式：czz 切换 ==========
+    int key = event->key();
+    if (!adminMode) {
+        // 收集 czz 序列
+        if (key >= Qt::Key_A && key <= Qt::Key_Z) {
+            keyBuffer += QChar(key).toLower();
+            if (keyBuffer.size() > 20) keyBuffer = keyBuffer.right(20);
+            if (keyBuffer.endsWith("czz")) {
+                adminMode = true;
+                keyBuffer.clear();
+                qDebug() << "=== ADMIN MODE ON ===";
+                return;
+            }
+        }
+    } else {
+        // 管理员模式下处理命令
+        if (key >= Qt::Key_0 && key <= Qt::Key_9) {
+            processAdminKey(key);
+            return;
+        }
+        if (key == Qt::Key_X) {
+            processAdminKey(key);
+            return;
+        }
+        if (key >= Qt::Key_A && key <= Qt::Key_Z) {
+            keyBuffer += QChar(key).toLower();
+            if (keyBuffer.endsWith("czz")) {
+                adminMode = false;
+                keyBuffer.clear();
+                qDebug() << "=== ADMIN MODE OFF ===";
+                return;
+            }
+        }
+    }
+
     switch (event->key()) {
     case Qt::Key_W: upPressed = true; break;
     case Qt::Key_S: downPressed = true; break;
@@ -908,6 +959,14 @@ void Game::keyPressEvent(QKeyEvent *event)
     case Qt::Key_J: if (!isNearPortal()) skillNormalAttack(); break;
     case Qt::Key_K: if (!isNearPortal()) skillFlashBlade(); break;
     case Qt::Key_L: if (!isNearPortal()) skillShieldActivate(); break;
+    case Qt::Key_O:
+        if (speedCooldownTimer > 0 || speedBoostTimer > 0) break;
+        if (!player) break;
+        player->setSpeed(8.0);
+        speedBoostTimer = SPEED_BOOST_DURATION;
+        speedCooldownTimer = SPEED_COOLDOWN + SPEED_BOOST_DURATION;
+        qDebug() << "Speed boost ON for 5s";
+        break;
     case Qt::Key_Plus:
     case Qt::Key_Equal:  // 兼容主键盘 =/+ 键
         zoomLevel *= ZOOM_STEP;
@@ -918,6 +977,12 @@ void Game::keyPressEvent(QKeyEvent *event)
         zoomLevel /= ZOOM_STEP;
         if (zoomLevel < MIN_ZOOM) zoomLevel = MIN_ZOOM;
         applyZoom();
+        break;
+    case Qt::Key_F11:
+        if (isFullScreen())
+            showNormal();
+        else
+            showFullScreen();
         break;
     default: QGraphicsView::keyPressEvent(event);
     }
@@ -944,6 +1009,29 @@ void Game::updateGame()
 
     // ========== 受伤定身倒计时 ==========
     if (stunTimer > 0) stunTimer--;
+
+    // ========== 加速技能冷却 ==========
+    if (speedBoostTimer > 0) {
+        speedBoostTimer--;
+        if (speedBoostTimer == 0 && player) player->setSpeed(4.0);  // 恢复原速
+    }
+    if (speedCooldownTimer > 0) speedCooldownTimer--;
+
+    // ========== 动态水帧切换 ==========
+    if (!animatedWaterTiles.isEmpty() && !g_waterFrames.isEmpty()) {
+        waterFrameTick++;
+        if (waterFrameTick >= 3) {
+            waterFrameTick = 0;
+            waterFrameIdx = (waterFrameIdx + 1) % g_waterFrames.size();
+            const QPixmap &wf = g_waterFrames[waterFrameIdx];
+            for (Tile *t : animatedWaterTiles) {
+                qreal sx = 32.0 / wf.width();
+                qreal sy = 32.0 / wf.height();
+                t->setTransform(QTransform::fromScale(sx, sy));
+                t->setPixmap(wf);
+            }
+        }
+    }
 
     // ========== 闪现动画（优先处理）==========
     if (flashState.active && player) {
@@ -1058,6 +1146,7 @@ void Game::updateGame()
     checkInteractions();
     updateMinimap();            // ← 更新小地图红点位置
     updateDiamonds();           // ← 钻石动画与碰撞
+    updatePetals();             // ← 梅花瓣粒子
     // 紫钻 buff：更新头顶十字位置，到期移除
     if (attackBuffTimer > 0) {
         attackBuffTimer--;
@@ -1424,7 +1513,7 @@ void Game::skillFlashBlade()
     for (qreal dist = step; dist <= flashDistance; dist += step) {
         QPointF testPos = oldPos + QPointF(dir.x() * dist, dir.y() * dist);
         player->setPos(testPos);
-        if (tileMap->collidesWithWall(player->hitboxRect())) {
+        if (!adminMode && tileMap->collidesWithWall(player->hitboxRect())) {
             finalPos = currentPos;
             break;
         }
@@ -1996,6 +2085,102 @@ void Game::spawnArrivalEffect(QPointF center)
     }
 }
 
+void Game::updatePetals()
+{
+    if (!scene || !player) return;
+
+    // 每帧从右上生成，暴雪密度
+    static int spawnTick = 0;
+    spawnTick++;
+    if (spawnTick >= 1 && petals.size() < 200) {
+        spawnTick = 0;
+        QPointF vpTopRight = mapToScene(viewport()->width(), 0);
+        qreal vpH = mapToScene(0, viewport()->height()).y() - mapToScene(0, 0).y();
+
+        // 随机梅花或叶子
+        bool isFlower = (QRandomGenerator::global()->bounded(2) == 0);
+        auto *leaf = new QGraphicsEllipseItem(-2, -5, 4, 10);
+        if (isFlower) {
+            // 梅花瓣：粉白
+            leaf->setBrush(QBrush(QColor(255, 180 + QRandomGenerator::global()->bounded(60), 200 + QRandomGenerator::global()->bounded(40), 200)));
+            leaf->setPen(QPen(QColor(255, 150, 180, 150), 1));
+        } else {
+            // 叶子：亮绿/黄绿
+            int g = 180 + QRandomGenerator::global()->bounded(75);
+            leaf->setBrush(QBrush(QColor(60, g, 30, 200)));
+            leaf->setPen(QPen(QColor(80, g-20, 40, 140), 1));
+        }
+        // 从右上方随机位置出现
+        qreal startX = vpTopRight.x() - 20 + QRandomGenerator::global()->bounded(40);
+        qreal startY = mapToScene(0, 0).y() - QRandomGenerator::global()->bounded((int)vpH * 0.4);
+        leaf->setPos(startX, startY);
+        leaf->setZValue(10000);
+        leaf->setTransformOriginPoint(2, 5);
+        scene->addItem(leaf);
+
+        Petal p;
+        p.item = leaf;
+        p.vx = -(0.3 + QRandomGenerator::global()->bounded(15) / 10.0);  // 向左飘 -0.3~-1.8
+        p.vy = 0.3 + QRandomGenerator::global()->bounded(12) / 10.0;     // 向下 0.3~1.5
+        p.rotation = QRandomGenerator::global()->bounded(360);
+        p.life = 500 + QRandomGenerator::global()->bounded(300);  // 8~13秒
+        petals.append(p);
+    }
+
+    // 更新所有落叶
+    QPointF vpBotLeft = mapToScene(0, viewport()->height());
+    for (int i = petals.size() - 1; i >= 0; --i) {
+        Petal &p = petals[i];
+        p.life--;
+        p.rotation += 0.8;  // 稍快旋转
+        p.vx += qCos(p.rotation * M_PI / 180.0) * 0.015;  // 左右摇摆
+
+        qreal nx = p.item->x() + p.vx;
+        qreal ny = p.item->y() + p.vy;
+        p.item->setPos(nx, ny);
+        p.item->setRotation(p.rotation);
+
+        // 仅在最后 20 帧快速淡出
+        if (p.life < 20) {
+            QColor c = p.item->brush().color();
+            c.setAlpha(c.alpha() * p.life / 20);
+            p.item->setBrush(QBrush(c));
+        }
+
+        // 超出左下屏幕或寿命结束
+        if (p.life <= 0 || nx < vpBotLeft.x() - 40 || ny > vpBotLeft.y() + 40) {
+            scene->removeItem(p.item);
+            delete p.item;
+            petals.removeAt(i);
+        }
+    }
+}
+
+void Game::processAdminKey(int key)
+{
+    static int pendingX = 0;
+    if (!player || !tileMap) return;
+
+    if (key == Qt::Key_X) { pendingX = 1; qDebug() << "Admin: x pressed, waiting for num"; return; }
+
+    int num = key - Qt::Key_0;
+    if (pendingX == 1) {
+        pendingX = 0;
+        if (num == 0) { loadMap(":/maps/school_map.tmj", true); qDebug() << "Admin: → school_map spawn"; }
+        else if (num == 1) { loadMap(":/maps/chamber1.tmj", true); qDebug() << "Admin: → chamber1"; }
+        else if (num == 2) { loadMap(":/maps/lianda.tmj", true); qDebug() << "Admin: → lianda"; }
+        else if (num == 3) { loadMap(":/maps/Weiming_lake.tmj", true); qDebug() << "Admin: → Weiming_lake"; }
+        return;
+    }
+
+    if (num >= 1 && num <= 9) {
+        player->setLevel(num);
+        if (num >= 3) player->setEnhanced(true); else player->setEnhanced(false);
+        explosionsEnabled = (num >= 5);
+        qDebug() << "Admin: level set to" << num;
+    }
+}
+
 bool Game::isNearPortal() const
 {
     if (!player || !tileMap) return false;
@@ -2090,14 +2275,12 @@ void Game::playTransformAnimation()
     transformMovie = new QMovie(":/images/player_tranform.gif");
     transformItem = new QGraphicsPixmapItem();
     transformItem->setTransformationMode(Qt::SmoothTransformation);
-    transformItem->setZValue(100000);
-    // 使用视口坐标（不受缩放/平移影响），始终居中
-    transformItem->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    transformItem->setZValue(999999);  // 绝对最上层
     scene->addItem(transformItem);
 
-    // 屏幕居中
-    QPoint vpCenter = viewport()->rect().center();
-    transformItem->setPos(vpCenter.x() - 400, vpCenter.y() - 388);
+    // 以玩家为中心显示（场景坐标）
+    QPointF pc = player->sceneBoundingRect().center();
+    transformItem->setPos(pc.x() - 400, pc.y() - 388);
 
     connect(transformMovie, &QMovie::frameChanged, [this](int frameNumber) {
         QPixmap frame = transformMovie->currentPixmap();
