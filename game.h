@@ -10,6 +10,7 @@
 #include "maploader.h"   // 必须包含，因为使用了 Portal 结构体
 #include "skill.h"
 #include "enemy.h"
+#include "tile.h"
 
 class Player;
 class TileMap;
@@ -39,10 +40,12 @@ public:
     /** 获取当前场上敌人数量 */
     int getEnemyCount() const { return enemies.size(); }
 
+// game.h 中的 private slots 部分
 private slots:
     void updateGame();
     void checkPortal();
-    void performTeleport(const Portal &portal); // 现在 Portal 已定义
+    void performTeleport(const Portal &portal);
+    void onPlayerDied();   // 新增
 
 private:
     QGraphicsScene *scene = nullptr;
@@ -154,10 +157,31 @@ private:
     QGraphicsEllipseItem *shieldItem = nullptr; // 玄武盾图形项
     bool shieldActive = false;                  // 玄武盾是否激活
 
+    // ========== 受伤定身 ==========
+    int stunTimer = 0;
+    static const int STUN_DURATION = 12;  // 0.2秒 (60fps × 0.2)
+
+    // ========== 钻石系统 ==========
+    struct Diamond {
+        QGraphicsPixmapItem *item = nullptr;
+        int type = 0;      // 0=红(补血), 1=蓝(补蓝), 2=紫(攻击翻倍)
+    };
+    QVector<Diamond> diamonds;
+    int attackBuffTimer = 0;   // 攻击力翻倍剩余帧数
+    QGraphicsSimpleTextItem *buffIndicator = nullptr;  // 紫钻头顶十字
+    static const int ATTACK_BUFF_DURATION = 600;  // 10秒
+    void spawnDiamonds();
+    void updateDiamonds();
+    void spawnCrossEffect(QPointF center, int colorType);  // 0=红,1=蓝,2=紫
+    void spawnArrivalEffect(QPointF center);  // 传送/出生炫酷竖线激光
+    bool isNearPortal() const;  // 玩家是否在传送门 2 格范围内
+    int getBuffedDamage(int base) const {
+        return (attackBuffTimer > 0) ? base * 2 : base;
+    }
+
     /** 根据当前按键状态获取闪现/刀浪方向向量 */
     QPointF getCurrentDirectionVector();
 
-private:
     // ========== 敌人系统 ==========
     QVector<Enemy*> enemies;                // 所有活跃敌人
     QVector<EnemyProjectile*> enemyProjectiles; // 所有活跃敌人炮弹
@@ -172,6 +196,40 @@ private:
 
     /** 每帧更新所有巢穴 */
     void updateSpawners();
+
+    QVector<QRectF> fireRects;           // 火焰区域矩形列表
+    int fireDamageCounter = 0;            // 火焰伤害计时器
+    static const int FIRE_DAMAGE_INTERVAL = 30;  // 每30帧扣1血（0.5秒）
+
+    void applyTerrainEffects();           // 应用地形效果（火焰、草地等）
+
+        // ========== 钥匙系统 ==========
+    float keyCount = 0.0f;                // 当前钥匙数量（支持0.25累加）
+    QVector<Tile*> chests;                // 场景中所有宝箱
+    QVector<Tile*> doors;                 // 场景中所有门
+
+    /** 检查玩家与宝箱/门的交互 */
+    void checkInteractions();
+    /** 打开宝箱（增加钥匙，移除宝箱） */
+    void openChest(Tile *chest);
+    /** 更新 UI 上钥匙数量的显示 */
+    void updateKeyDisplay();
+
+    // HUD 钥匙文本（在已有的 HUD 成员附近添加）
+    QGraphicsSimpleTextItem *hudKeyText = nullptr;
+
+    /** 移除与指定门瓦片相连的所有门区域（BFS） */
+    int removeDoorRegion(Tile *startDoor);
+
+    // ========== 旋转传送门 ==========
+    QVector<QGraphicsPixmapItem*> portalSprites;
+    int portalRotTick = 0;
+
+    // ========== 小地图 ==========
+    QGraphicsPixmapItem *minimapItem = nullptr;
+    QGraphicsEllipseItem *minimapDot = nullptr;
+    void createMinimap();
+    void updateMinimap();
 };
 
 #endif // GAME_H

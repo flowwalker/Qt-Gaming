@@ -37,6 +37,7 @@ Spawner::Spawner(TileMap *tileMap, QGraphicsScene *scene, QPointF pos, Game *gam
     setPixmap(pixmap);
     setTransformationMode(Qt::SmoothTransformation);
     setPos(pos);
+    setZValue(4);  // 在地形之上，敌人之下
 
     if (scene) {
         scene->addItem(this);

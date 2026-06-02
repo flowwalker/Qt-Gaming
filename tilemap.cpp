@@ -1,3 +1,4 @@
+// tilemap.cpp
 #include "tilemap.h"
 #include "maploader.h"
 #include <QDebug>
@@ -18,11 +19,19 @@ void TileMap::clear()
     }
     allTiles.clear();
     walls.clear();
+    gridWalls.clear();
+
+    // ========== 清理水相关 ==========
+    waterTiles.clear();
+    gridWaters.clear();
+
     portals.clear();
     playerStart = QPointF();
+    mapWidth = 0;
+    mapHeight = 0;
 }
 
-bool TileMap::loadFromFile(const QString &jsonPath, QGraphicsScene *scene)
+bool TileMap::loadFromFile(const QString &jsonPath)
 {
     clear();
 
@@ -33,71 +42,133 @@ bool TileMap::loadFromFile(const QString &jsonPath, QGraphicsScene *scene)
     }
 
     tileSize = mapData.tileWidth;
+    mapWidth = mapData.width;
+    mapHeight = mapData.height;
 
-    // 遍历所有瓦片图层
-    for (auto it = mapData.layerData.begin(); it != mapData.layerData.end(); ++it) {
-        const QString &layerName = it.key();
-        const QVector<int> &data = it.value();
-        int width = mapData.width;
-        int height = mapData.height;
-        if (data.size() != width * height) {
-            qDebug() << "Layer data size mismatch for layer:" << layerName;
-            continue;
-        }
-
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                int gid = data[y * width + x];
-                if (gid == 0) continue;
-                QString imagePath = mapData.gidToImage.value(gid, "");
-                if (imagePath.isEmpty()) continue;
-
-                // 随机替换 floor / wall 图片，并固定缩放为瓦片大小
-                QString finalPath = imagePath;
-                QSize fixedSize;
-                if (imagePath.endsWith("floor.png")) {
-                    finalPath = (QRandomGenerator::global()->bounded(2) == 0)
-                                ? ":/images/floor_dark.png" : ":/images/floor_light.png";
-                    fixedSize = QSize(tileSize, tileSize);
-                } else if (imagePath.endsWith("wall.png")) {
-                    int r = QRandomGenerator::global()->bounded(3);
-                    finalPath = QString(":/images/wall_%1.png").arg(r + 1);
-                    fixedSize = QSize(tileSize, tileSize);
-                }
-
-                Tile *tile = new Tile(finalPath, x * tileSize, y * tileSize, fixedSize);
-                scene->addItem(tile);
-                allTiles.append(tile);
-
-                // 碰撞检测：仅图层名为 "wall" 的瓦片加入墙壁列表
-                if (layerName == "wall") {
-                    walls.append(tile);
-                }
-            }
-        }
-    }
-
-    // 保存传送门和玩家出生点
     portals = mapData.portals;
     playerStart = mapData.playerStart.position;
 
+    // 注意：瓦片由 Game 类手动绘制，本函数只保存元数据
     return true;
+}
+
+void TileMap::addWallTile(Tile *tile)
+{
+    if (!tile) return;
+    walls.append(tile);
+    allTiles.append(tile);
+    buildSpatialGrid();
+}
+
+void TileMap::buildSpatialGrid()
+{
+    gridWalls.clear();
+    int gridPixelSize = tileSize * GRID_SIZE;
+    for (Tile *wall : walls) {
+        qreal wx = wall->x();
+        qreal wy = wall->y();
+        int gridX = static_cast<int>(wx) / gridPixelSize;
+        int gridY = static_cast<int>(wy) / gridPixelSize;
+        gridWalls[{gridX, gridY}].append(wall);
+    }
+}
+
+QPair<int,int> TileMap::getGridCoord(int x, int y) const
+{
+    int gridPixelSize = tileSize * GRID_SIZE;
+    return { x / gridPixelSize, y / gridPixelSize };
 }
 
 bool TileMap::collidesWithWall(QGraphicsItem *item) const
 {
-    for (Tile *wall : walls) {
-        if (item->collidesWithItem(wall))
-            return true;
-    }
-    return false;
+    if (!item) return false;
+    return collidesWithWall(item->sceneBoundingRect());
 }
 
 bool TileMap::collidesWithWall(const QRectF &rect) const
 {
-    for (Tile *wall : walls) {
-        if (wall->sceneBoundingRect().intersects(rect))
-            return true;
+    if (walls.isEmpty()) return false;
+    int gridPixelSize = tileSize * GRID_SIZE;
+    int minGridX = static_cast<int>(rect.left()) / gridPixelSize;
+    int maxGridX = static_cast<int>(rect.right()) / gridPixelSize;
+    int minGridY = static_cast<int>(rect.top()) / gridPixelSize;
+    int maxGridY = static_cast<int>(rect.bottom()) / gridPixelSize;
+
+    for (int gx = minGridX; gx <= maxGridX; ++gx) {
+        for (int gy = minGridY; gy <= maxGridY; ++gy) {
+            auto it = gridWalls.find({gx, gy});
+            if (it != gridWalls.end()) {
+                for (Tile *wall : it.value()) {
+                    if (wall->sceneBoundingRect().intersects(rect))
+                        return true;
+                }
+            }
+        }
     }
     return false;
+}
+
+// ========== 水的实现 ==========
+
+void TileMap::addWaterTile(Tile *tile)
+{
+    if (!tile) return;
+    waterTiles.append(tile);
+    allTiles.append(tile);
+    buildWaterGrid();
+}
+
+void TileMap::buildWaterGrid()
+{
+    gridWaters.clear();
+    int gridPixelSize = tileSize * GRID_SIZE;
+    for (Tile *water : waterTiles) {
+        qreal wx = water->x();
+        qreal wy = water->y();
+        int gridX = static_cast<int>(wx) / gridPixelSize;
+        int gridY = static_cast<int>(wy) / gridPixelSize;
+        gridWaters[{gridX, gridY}].append(water);
+    }
+}
+
+void TileMap::addWaterTiles(const QVector<Tile*> &tiles)
+{
+    if (tiles.isEmpty()) return;
+    waterTiles.append(tiles);
+    allTiles.append(tiles);
+    buildWaterGrid();   // 一次性重建
+}
+
+bool TileMap::collidesWithWater(const QRectF &rect) const
+{
+    if (waterTiles.isEmpty()) return false;
+    int gridPixelSize = tileSize * GRID_SIZE;
+    int minGridX = static_cast<int>(rect.left()) / gridPixelSize;
+    int maxGridX = static_cast<int>(rect.right()) / gridPixelSize;
+    int minGridY = static_cast<int>(rect.top()) / gridPixelSize;
+    int maxGridY = static_cast<int>(rect.bottom()) / gridPixelSize;
+
+    for (int gx = minGridX; gx <= maxGridX; ++gx) {
+        for (int gy = minGridY; gy <= maxGridY; ++gy) {
+            auto it = gridWaters.find({gx, gy});
+            if (it != gridWaters.end()) {
+                for (Tile *water : it.value()) {
+                    if (water->sceneBoundingRect().intersects(rect))
+                        return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+void TileMap::removeWallTile(Tile *tile)
+{
+    if (!tile) return;
+    // 从墙壁列表中移除
+    walls.removeAll(tile);
+    // 同时从 allTiles 中移除（可选，便于统一清理，但并非必须）
+    allTiles.removeAll(tile);
+    // 重建空间索引（因为墙壁数量少，重建开销可接受）
+    buildSpatialGrid();
 }
