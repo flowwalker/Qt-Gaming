@@ -31,6 +31,8 @@ public:
 
     void keyPressEvent(QKeyEvent *event) override;
     void keyReleaseEvent(QKeyEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
     void loadMap(const QString &mapFilePath, bool useStartPoint = true);
 
     /** 敌人注册的炮弹加入游戏管理列表 */
@@ -172,6 +174,30 @@ private:
     QString keyBuffer;
     void processAdminKey(int key);
 
+    // ========== 调试：地图图层置顶 ==========
+    bool debugMapView = false;
+
+    // ========== 子空间区域ID：0=无, 1=garden, 2=gateway, 3=maze, 4=secret ==========
+    int subspaceId = 0;
+
+    // ========== 雾和树叠加层引用（用于运行时调整透明度）==========
+    QGraphicsPixmapItem *fogOverlay = nullptr;
+    qreal fogTargetOpacity = 0.0;            // 雾目标透明度（10s渐变）
+    QVector<QGraphicsPixmapItem*> treeOverlays;
+
+    // ========== 黑幕（区域过渡用）==========
+    QGraphicsRectItem *blackCurtain = nullptr;
+    int curtainOpacityTarget = 0;   // 目标透明度百分比 (0~100)
+
+    // ========== 传送过渡状态 ==========
+    bool portalTransitionActive = false;
+    int  portalTransitionPhase = 0;  // 0=idle, 1=fadeOut, 2=teleported, 3=fadeIn→done
+    int  portalTransitionTick = 0;
+    QPointF portalDest;              // 传送目标像素坐标
+    bool portalShrink = true;        // true=缩小(→1×1), false=恢复(→96×96)
+    int portalCooldown = 0;          // 传送后冷却帧数，防止立即反弹
+    static const int FADE_SPEED = 3; // 每帧透明度变化量
+
     // ========== 钻石系统 ==========
     struct Diamond {
         QGraphicsPixmapItem *item = nullptr;
@@ -242,14 +268,6 @@ private:
     QVector<Petal> petals;
     void updatePetals();
 
-    // ========== 动态水 ==========
-    QVector<Tile*> animatedWaterTiles;
-    int waterFrameIdx = 0;
-    int waterFrameTick = 0;
-
-    // ========== 主地图背景叠加 ==========
-    QGraphicsPixmapItem *bgOverlay = nullptr;
-
     // ========== 旋转传送门 ==========
     QVector<QGraphicsPixmapItem*> portalSprites;
     int portalRotTick = 0;
@@ -257,8 +275,43 @@ private:
     // ========== 小地图 ==========
     QGraphicsPixmapItem *minimapItem = nullptr;
     QGraphicsEllipseItem *minimapDot = nullptr;
+    QGraphicsSimpleTextItem *minimapPosText = nullptr;  // 实时坐标
     void createMinimap();
     void updateMinimap();
+
+    // ========== 菜单系统 ==========
+    bool isMainMenuActive;          // 主菜单是否显示
+    bool isGameMenuActive;          // 游戏内菜单是否显示
+
+    QGraphicsSimpleTextItem *mainMenuStartItem;
+    QGraphicsSimpleTextItem *mainMenuAboutItem;
+    QGraphicsSimpleTextItem *mainMenuExitItem;
+
+    QGraphicsPixmapItem *gameMenuButton;               // 右上角菜单按钮
+    QGraphicsSimpleTextItem *gameMenuContinueItem;    // 游戏内菜单：继续
+    QGraphicsSimpleTextItem *gameMenuAboutItem;       // 游戏内菜单：关于
+    QGraphicsSimpleTextItem *gameMenuExitItem;        // 游戏内菜单：退出
+
+    void setupEmptyScene();          // 清空场景并设置纯色背景（用于主菜单）
+    void showMainMenu();             // 显示主菜单
+    void hideMainMenu();             // 隐藏主菜单
+    void startGame();                // 开始新游戏（加载地图）
+    void quitGame();                 // 退出程序
+
+    void createGameMenuButton();     // 在游戏场景右上角创建菜单按钮
+    void showGameMenu();             // 显示游戏内菜单（并暂停游戏）
+    void hideGameMenu();             // 隐藏游戏内菜单（恢复游戏）
+
+    void updateGameMenuButtonPosition();  // 更新按钮位置跟随屏幕右上角
+
+    // ========== 地图介绍对话框 ==========
+    bool introShownForSchoolMap;           // 校史馆介绍是否已显示
+    QSet<QString> introShownForTargetMaps; // 已显示过介绍的目标地图（存地图文件名）
+
+    void checkAndShowIntro();              // 在 updateGame 中检测并显示介绍
+    void showIntroDialog(const QString &mapKey); // 显示介绍对话框，参数为地图标识
+    bool waitingForIntro = false;    // 是否等待玩家离开传送门以显示介绍
+    QString waitingIntroMap;         // 等待显示介绍的地图路径
 };
 
 #endif // GAME_H
