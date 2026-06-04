@@ -140,7 +140,7 @@ private:
     /** 每帧更新所有破空梭（移动、碰撞、清理） */
     void updateTriangleProjectiles();
     /** 在指定位置创建爆炸动画（3x3 tile 大小） */
-    void createExplosion(QPointF centerPos);
+    void createExplosion(QPointF centerPos, int size = 144);
 
     /** 技能二：瞬影浪斩（按 K 键触发） */
     void skillFlashBlade();
@@ -186,8 +186,8 @@ private:
     };
     QVector<DangerZone> dangerZones;
     int dangerSpawnTimer = 0;
-    static const int DANGER_INTERVAL = 900;   // 15秒（60fps）
-    static const int DANGER_LIFETIME = 300;   // 5秒
+    static const int DANGER_INTERVAL = 180;   // 3秒（60fps）
+    static const int DANGER_LIFETIME = 150;   // 2.5秒
     void updateDangerZones();
 
     // ========== J 连击系统（增强形态）==========

@@ -30,6 +30,10 @@ namespace {
     bool g_bombLoaded = false;
     QVector<QPixmap> g_fireBgFrames;
     bool g_fireBgLoaded = false;
+    QVector<QPixmap> g_fireHitFrames;
+    bool g_fireHitLoaded = false;
+    QVector<QPixmap> g_rushJumbFrames;
+    bool g_rushJumbLoaded = false;
 }
 
 QVector<QPixmap> g_daolangFrames;
@@ -95,6 +99,42 @@ namespace {
             qDebug() << "Failed to load daolang_left.gif frames";
         }
     }
+
+    void loadFireHitFrames()
+    {
+        if (g_fireHitLoaded) return;
+        g_fireHitLoaded = true;
+        QImageReader reader(":/images/fire_hit.gif");
+        reader.setAutoDetectImageFormat(true);
+        while (reader.canRead()) {
+            QImage img = reader.read();
+            if (!img.isNull()) {
+                g_fireHitFrames.append(QPixmap::fromImage(img).scaled(
+                    144, 144, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            }
+        }
+        if (g_fireHitFrames.isEmpty()) {
+            qDebug() << "Failed to load fire_hit.gif frames";
+        }
+    }
+
+    void loadRushJumbFrames()
+    {
+        if (g_rushJumbLoaded) return;
+        g_rushJumbLoaded = true;
+        QImageReader reader(":/images/player_enhanced_k_rush_jumb_bright.gif");
+        reader.setAutoDetectImageFormat(true);
+        while (reader.canRead()) {
+            QImage img = reader.read();
+            if (!img.isNull()) {
+                g_rushJumbFrames.append(QPixmap::fromImage(img).scaled(
+                    77, 77, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            }
+        }
+        if (g_rushJumbFrames.isEmpty()) {
+            qDebug() << "Failed to load player_enhanced_k_rush_jumb_bright.gif frames";
+        }
+    }
 }
 
 Game::Game(QWidget *parent)
@@ -115,11 +155,13 @@ Game::Game(QWidget *parent)
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setWindowTitle("Qt-Gaming");
 
-    // 预加载所有帧缓存（与原来相同）
+    // 预加载所有帧缓存（启动时一次解码，运行时零开销）
     preloadProjectileFrames();
     loadBombFrames();
     loadFireBgFrames();
     loadDaolangFrames();
+    loadFireHitFrames();
+    loadRushJumbFrames();
     preloadMonsterFrames();
 
     // 显示主菜单（不加载地图）
@@ -1313,7 +1355,6 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                     int sz = 5 + QRandomGenerator::global()->bounded(5) * 2;
                     QPixmap pm(":/images/winter_tree.png");
                     if (!pm.isNull()) {
-                        int pxSz = sz * ts;
                         auto *item = new QGraphicsPixmapItem();
                         item->setPixmap(pm);
                         item->setTransformationMode(Qt::SmoothTransformation);
@@ -2074,18 +2115,11 @@ void Game::updateGame()
         player->setPos(player->pos() + flashState.step);
         flashState.framesLeft--;
 
-        // 增强形态闪现：玩家身上播放 rush_jumb GIF
+        // 增强形态闪现：玩家身上播放 rush_jumb GIF（启动时已预加载）
         if (player->getEnhanced() && qAbs(flashState.bladeDir.x()) > 0.01) {
-            static QVector<QPixmap> rushFrames;
-            static bool rushLoaded = false;
-            if (!rushLoaded) {
-                QImageReader reader(":/images/player_enhanced_k_rush_jumb_bright.gif");
-                while (reader.canRead()) { QImage img = reader.read(); if (!img.isNull()) rushFrames.append(QPixmap::fromImage(img).scaled(77,77,Qt::KeepAspectRatio,Qt::SmoothTransformation)); }
-                rushLoaded = true;
-            }
-            if (!rushFrames.isEmpty()) {
-                int idx = (20 - flashState.framesLeft) % rushFrames.size();
-                QPixmap frame = rushFrames[idx];
+            if (!g_rushJumbFrames.isEmpty()) {
+                int idx = (20 - flashState.framesLeft) % g_rushJumbFrames.size();
+                QPixmap frame = g_rushJumbFrames[idx];
                 if (flashState.bladeDir.x() < 0) frame = frame.transformed(QTransform::fromScale(-1,1), Qt::SmoothTransformation);
                 player->setPixmap(frame);
                 player->setTransform(QTransform());
@@ -2516,10 +2550,38 @@ void Game::skillTriangleShot()
     triangleProjectiles.append(tp);
 }
 
-void Game::createExplosion(QPointF centerPos)
+void Game::createExplosion(QPointF centerPos, int size)
 {
-    qDebug() << "[Bomb] createExplosion called, frames=" << g_bombFrames.size();
+    qDebug() << "[Bomb] createExplosion called, frames=" << g_bombFrames.size() << "size=" << size;
     if (!scene || g_bombFrames.isEmpty()) return;
+
+    // 创建爆炸动画项
+    QGraphicsPixmapItem *bombItem = new QGraphicsPixmapItem();
+    bombItem->setPixmap(g_bombFrames[0]);
+    bombItem->setZValue(999999);  // 最顶层，仅低于变身动画(10000000)
+    bombItem->setTransformationMode(Qt::SmoothTransformation);
+    // 按指定尺寸缩放（默认144，危险区域传480与红圈一致）
+    qreal s = static_cast<qreal>(size) / g_bombFrames[0].width();
+    bombItem->setTransform(QTransform::fromScale(s, s));
+    bombItem->setPos(centerPos.x() - size/2, centerPos.y() - size/2);
+    scene->addItem(bombItem);
+
+    // 手动逐帧播放
+    int *frameIdx = new int(0);
+    QTimer *timer = new QTimer(this);
+    connect(timer, &QTimer::timeout, [timer, bombItem, frameIdx]() {
+        (*frameIdx)++;
+        if (*frameIdx >= g_bombFrames.size()) {
+            timer->stop();
+            if (bombItem->scene()) bombItem->scene()->removeItem(bombItem);
+            delete bombItem;
+            delete frameIdx;
+            timer->deleteLater();
+            return;
+        }
+        bombItem->setPixmap(g_bombFrames[*frameIdx]);
+    });
+    timer->start(8);  // ~8ms/帧，约0.38秒播完
 }
 
 QPointF Game::getCurrentDirectionVector()
@@ -2729,40 +2791,33 @@ void Game::skillNormalAttack()
     QPointF playerCenter = player->sceneBoundingRect().center();
     QRectF attackRect(playerCenter.x() - 48.0, playerCenter.y() - 48.0, 96.0, 96.0);
 
-    // ========== 2. 普攻 GIF 特效（持续 2 秒后消失）==========
-    QMovie *hitMovie = new QMovie(":/images/fire_hit.gif");
+    // ========== 2. 普攻 GIF 特效（预加载帧，持续 2 秒后消失）==========
     QGraphicsPixmapItem *hitItem = new QGraphicsPixmapItem();
     hitItem->setTransformationMode(Qt::SmoothTransformation);
+    hitItem->setZValue(50);
     scene->addItem(hitItem);
+    hitItem->setPos(playerCenter.x() - 72, playerCenter.y() - 72);
 
-    connect(hitMovie, &QMovie::frameChanged, [hitItem, hitMovie](int) {
-        QPixmap frame = hitMovie->currentPixmap();
-        if (!frame.isNull()) {
-            frame = frame.scaled(144, 144, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            hitItem->setPixmap(frame);
-        }
-    });
-
-    // 动画停止后延迟清理，避免在信号处理中直接销毁 QMovie
-    connect(hitMovie, &QMovie::stateChanged, [hitItem, hitMovie](QMovie::MovieState state) {
-        if (state == QMovie::NotRunning) {
-            QTimer::singleShot(0, [hitItem, hitMovie]() {
+    if (!g_fireHitFrames.isEmpty()) {
+        hitItem->setPixmap(g_fireHitFrames[0]);
+        int *frameIdx = new int(0);
+        int *elapsed = new int(0);
+        QTimer *hitTimer = new QTimer(this);
+        connect(hitTimer, &QTimer::timeout, [hitTimer, hitItem, frameIdx, elapsed]() {
+            (*elapsed)++;
+            (*frameIdx) = (*frameIdx + 1) % g_fireHitFrames.size();
+            hitItem->setPixmap(g_fireHitFrames[*frameIdx]);
+            if (*elapsed >= 250) {  // 250×8ms = 2s
+                hitTimer->stop();
                 if (hitItem->scene()) hitItem->scene()->removeItem(hitItem);
                 delete hitItem;
-                delete hitMovie;
-            });
-        }
-    });
-
-    // 2 秒后延迟停止（让火焰持续显示 2 秒）
-    QTimer::singleShot(2000, [hitMovie]() {
-        if (hitMovie->state() != QMovie::NotRunning) {
-            QTimer::singleShot(0, hitMovie, &QMovie::stop);
-        }
-    });
-
-    hitMovie->start();
-    hitItem->setPos(playerCenter.x() - 48, playerCenter.y() - 48);
+                delete frameIdx;
+                delete elapsed;
+                hitTimer->deleteLater();
+            }
+        });
+        hitTimer->start(8);
+    }
 
     // ========== 3. 伤害检测（九宫格范围内的 hittable 对象）==========
     for (QGraphicsItem *hittable : hittableItems) {
@@ -3074,6 +3129,7 @@ void Game::spawnDiamonds()
                 item->setPos(gx * ts, gy * ts);
                 item->setZValue(6);
                 item->setTransformationMode(Qt::SmoothTransformation);
+                scene->addItem(item);
                 diamonds.append({item, type});
                 break;
             }
@@ -3377,7 +3433,7 @@ void Game::updateEnemies()
 {
     // 根据玩家等级调整所有敌人的攻击间隔（等级越高，怪物射得越快）
     int playerLevel = player ? player->getLevel() : 1;
-    int newInterval = qMax(30, 120 - (playerLevel - 1) * 15);
+    int newInterval = qMax(60, 180 - (playerLevel - 1) * 12);
 
     // 倒序遍历，方便安全删除已死亡的敌人
     for (int i = enemies.size() - 1; i >= 0; --i) {
@@ -3913,7 +3969,7 @@ void Game::updateDangerZones()
         // 时间到：爆炸
         if (dz.lifetime <= 0) {
             // 爆炸效果
-            createExplosion(dz.pos);
+            createExplosion(dz.pos, dz.radius * 2);  // 与红圈同大小 (480px)
             // 判定玩家是否在范围内：扣20%最大血量
             QRectF playerRect = player->hitboxRect();
             QRectF dangerRect(dz.pos.x() - dz.radius, dz.pos.y() - dz.radius, dz.radius*2, dz.radius*2);
