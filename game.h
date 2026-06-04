@@ -174,6 +174,41 @@ private:
     QString keyBuffer;
     void processAdminKey(int key);
 
+    // ========== 危险区域（lianda地图机制）==========
+    struct DangerZone {
+        QGraphicsEllipseItem *circle = nullptr;
+        QGraphicsLineItem *cross1 = nullptr;
+        QGraphicsLineItem *cross2 = nullptr;
+        QPointF pos;
+        QPointF driftVel;
+        int lifetime = 0;       // 剩余帧数（5s = 300帧）
+        int radius = 240;       // 7.5 tiles = 15×15范围
+    };
+    QVector<DangerZone> dangerZones;
+    int dangerSpawnTimer = 0;
+    static const int DANGER_INTERVAL = 900;   // 15秒（60fps）
+    static const int DANGER_LIFETIME = 300;   // 5秒
+    void updateDangerZones();
+
+    // ========== J 连击系统（增强形态）==========
+    int jPressCount = 0;          // 短时间内按 J 的次数 (1~4)
+    int jPressTimer = 0;          // 松开后倒计时，归零时播放连击
+    bool jPlaying = false;        // 正在播放连击动画
+    int jPlayIndex = 0;           // 当前播放到第几个
+    int jPlayTick = 0;            // 动画帧计数
+    QPointF jRushDir;             // 第四次突进方向
+    QPointF lastMoveDir{1,0};      // 最近移动方向，默认右
+    bool rushDashing = false;      // 突进平滑移动中
+    int rushFramesLeft = 0;
+    QPointF rushStep;
+    static const int J_PRESS_WINDOW = 30;  // 0.5秒内连续按J有效
+
+    // ========== 技能栏 ==========
+    bool skillBarVisible = true;
+    QVector<QGraphicsItem*> skillBarItems;
+    void createSkillBar();
+    void updateSkillBarPosition();
+
     // ========== 调试：地图图层置顶 ==========
     bool debugMapView = false;
 
@@ -183,7 +218,11 @@ private:
     // ========== 雾和树叠加层引用（用于运行时调整透明度）==========
     QGraphicsPixmapItem *fogOverlay = nullptr;
     qreal fogTargetOpacity = 0.0;            // 雾目标透明度（10s渐变）
-    QVector<QGraphicsPixmapItem*> treeOverlays;
+    QVector<QGraphicsPixmapItem*> treeOverlays;       // 区域1花园树
+    QVector<QGraphicsPixmapItem*> gatewayTrees;        // 区域2周围树
+    QVector<QGraphicsPixmapItem*> secretTrees;         // 区域4周围树
+    QGraphicsPixmapItem *gatewayRoof = nullptr;
+    QGraphicsPixmapItem *secretRoof = nullptr;
 
     // ========== 黑幕（区域过渡用）==========
     QGraphicsRectItem *blackCurtain = nullptr;
@@ -292,9 +331,11 @@ private:
     QGraphicsSimpleTextItem *gameMenuAboutItem;       // 游戏内菜单：关于
     QGraphicsSimpleTextItem *gameMenuExitItem;        // 游戏内菜单：退出
 
+    QTimer *loadingPulseTimer = nullptr;  // 加载脉冲动画
     void setupEmptyScene();          // 清空场景并设置纯色背景（用于主菜单）
     void showMainMenu();             // 显示主菜单
     void hideMainMenu();             // 隐藏主菜单
+    void startLoadingPulse();        // 开始游戏按钮红色脉冲
     void startGame();                // 开始新游戏（加载地图）
     void quitGame();                 // 退出程序
 

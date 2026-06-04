@@ -50,7 +50,7 @@ namespace {
                 // 每 2 帧取 1 帧，减少总帧数
                 if (count % 2 == 0) {
                     g_bombFrames.append(QPixmap::fromImage(img).scaled(
-                        96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                        144, 144, Qt::KeepAspectRatio, Qt::SmoothTransformation));
                 }
                 count++;
             }
@@ -183,18 +183,29 @@ void Game::hideMainMenu()
     isMainMenuActive = false;
 }
 
+void Game::startLoadingPulse()
+{
+    if (!mainMenuStartItem) return;
+    mainMenuStartItem->setBrush(QBrush(QColor(255, 50, 50)));
+    if (loadingPulseTimer) { loadingPulseTimer->stop(); delete loadingPulseTimer; }
+    loadingPulseTimer = new QTimer(this);
+    int *tick = new int(0);
+    connect(loadingPulseTimer, &QTimer::timeout, [this, tick]() {
+        (*tick)++;
+        if (!mainMenuStartItem) return;
+        int bright = 50 + (int)(80 * (1.0 + qSin((*tick) * 0.3)) / 2.0);
+        mainMenuStartItem->setBrush(QBrush(QColor(255, bright, bright)));
+    });
+    loadingPulseTimer->start(80);
+}
+
 void Game::startGame()
 {
+    // 按钮变红+刷新一帧
+    if (mainMenuStartItem) mainMenuStartItem->setBrush(QBrush(QColor(255, 50, 50)));
+    QApplication::processEvents();
     hideMainMenu();
-    // 加载默认地图
     loadMap(":/maps/new_school_map.tmj", true);
-    // 确保定时器启动
-    if (!gameTimer) {
-        gameTimer = new QTimer(this);
-        connect(gameTimer, &QTimer::timeout, this, &Game::updateGame);
-    }
-    gameTimer->start(16);
-    // 菜单按钮已在 loadMap() 中创建，无需重复
 }
 
 void Game::quitGame()
@@ -205,25 +216,25 @@ void Game::quitGame()
 void Game::createGameMenuButton()
 {
     if (!scene) return;
-    // 绘制 40x40 圆角矩形菜单图标
     QPixmap pixmap(40, 40);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
-    painter.setBrush(QBrush(QColor(200, 200, 200, 200)));
-    painter.setPen(Qt::NoPen);
-    painter.drawRoundedRect(0, 0, 40, 40, 8, 8);
-    painter.setPen(QPen(Qt::black, 2));
-    painter.drawLine(10, 15, 30, 15);
+    painter.setRenderHint(QPainter::Antialiasing);
+    // 半透明暗底
+    painter.setBrush(QBrush(QColor(20, 20, 30, 180)));
+    painter.setPen(QPen(QColor(100, 120, 180, 200), 2));
+    painter.drawRoundedRect(2, 2, 36, 36, 10, 10);
+    // 三横线
+    painter.setPen(QPen(QColor(200, 210, 240), 3));
+    painter.drawLine(10, 14, 30, 14);
     painter.drawLine(10, 20, 30, 20);
-    painter.drawLine(10, 25, 30, 25);
+    painter.drawLine(10, 26, 30, 26);
     painter.end();
 
     gameMenuButton = new QGraphicsPixmapItem(pixmap);
     gameMenuButton->setZValue(2000);
     gameMenuButton->setAcceptHoverEvents(true);
     scene->addItem(gameMenuButton);
-
-    // 首次更新位置
     updateGameMenuButtonPosition();
 }
 
@@ -233,6 +244,69 @@ void Game::updateGameMenuButtonPosition()
     // 放在小地图下方，避免遮挡
     QPointF scenePos = mapToScene(viewport()->width() - 50, 70);
     gameMenuButton->setPos(scenePos);
+}
+
+void Game::createSkillBar()
+{
+    if (!scene) return;
+    // 清理旧技能栏
+    for (auto *item : skillBarItems) { scene->removeItem(item); delete item; }
+    skillBarItems.clear();
+
+    struct { QString key; QColor color; } skills[] = {
+        {"I", QColor(255, 100, 60)},    // 宿命火球 - 橙红
+        {"J", QColor(255, 60, 60)},      // 八面炼狱 - 红
+        {"K", QColor(100, 200, 255)},    // 瞬影浪斩 - 蓝
+        {"N", QColor(80, 160, 255)},     // 月牙八刃 - 蓝
+        {"H", QColor(255, 200, 50)},     // 熔岩弹 - 金
+        {"L", QColor(100, 220, 180)},    // 玄武盾 - 青绿
+        {"O", QColor(200, 140, 255)},    // 加速 - 紫
+    };
+    const int n = 7;
+    const int r = 18;  // 圆半径
+
+    for (int i = 0; i < n; i++) {
+        // 背景圆
+        auto *circle = new QGraphicsEllipseItem(-r, -r, r*2, r*2);
+        circle->setBrush(QBrush(QColor(20, 20, 30, 200)));
+        circle->setPen(QPen(skills[i].color, 2));
+        circle->setZValue(2000);
+        scene->addItem(circle);
+        skillBarItems.append(circle);
+
+        // 字母
+        auto *text = new QGraphicsSimpleTextItem(skills[i].key);
+        text->setBrush(QBrush(skills[i].color));
+        QFont f; f.setPointSize(12); f.setBold(true);
+        text->setFont(f);
+        text->setZValue(2001);
+        text->setPos(-text->boundingRect().width()/2, -text->boundingRect().height()/2);
+        scene->addItem(text);
+        skillBarItems.append(text);
+    }
+    updateSkillBarPosition();
+}
+
+void Game::updateSkillBarPosition()
+{
+    if (skillBarItems.isEmpty()) return;
+    const int n = 7;
+    const int spacing = 50;  // 圆心间距
+    int vpW = viewport()->width();
+    int vpH = viewport()->height();
+
+    for (int i = 0; i < n; i++) {
+        // 底部居中排列
+        qreal cx = vpW/2.0 - (n-1)*spacing/2.0 + i*spacing;
+        qreal cy = vpH - 35;
+        QPointF scenePos = mapToScene((int)cx, (int)cy);
+        // 圆 (index 2*i) + 文字 (index 2*i+1)
+        skillBarItems[2*i]->setPos(scenePos);
+        skillBarItems[2*i+1]->setPos(scenePos);
+        bool vis = skillBarVisible && !debugMapView;
+        skillBarItems[2*i]->setVisible(vis);
+        skillBarItems[2*i+1]->setVisible(vis);
+    }
 }
 
 void Game::showGameMenu()
@@ -382,6 +456,10 @@ Game::~Game()
     portalSprites.clear();
     fogOverlay = nullptr;
     treeOverlays.clear();
+    gatewayTrees.clear();
+    secretTrees.clear();
+    gatewayRoof = nullptr;
+    secretRoof = nullptr;
     blackCurtain = nullptr;
     portalTransitionActive = false;
     portalTransitionPhase = 0;
@@ -523,8 +601,13 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     // ---------- 2. 清理所有现有资源 ----------
     // 清理菜单按钮（如果存在）
     if (gameMenuButton) {
-        gameMenuButton = nullptr; // 按钮将在场景清空时被删除，只需置空指针
+        gameMenuButton = nullptr;
     }
+    for (auto *item : skillBarItems) { delete item; }
+    skillBarItems.clear();
+    for (auto &dz : dangerZones) { delete dz.circle; delete dz.cross1; delete dz.cross2; }
+    dangerZones.clear();
+    dangerSpawnTimer = 0;
 
     // 清理旧地图
     if (tileMap) {
@@ -643,6 +726,10 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     portalSprites.clear();
     fogOverlay = nullptr;
     treeOverlays.clear();
+    gatewayTrees.clear();
+    secretTrees.clear();
+    gatewayRoof = nullptr;
+    secretRoof = nullptr;
     blackCurtain = nullptr;
     portalTransitionActive = false;
     portalTransitionPhase = 0;
@@ -804,7 +891,7 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                     continue;
                 }
 
-                // ========== 处理 fireland 图层（持续掉血）==========
+                // ========== 处理 fireland 图层（持续掉血 + 方向检测）==========
                 if (layerName == "fireland") {
                     int fireCount = 0;
                     for (int y = 0; y < mapHeight; ++y) {
@@ -815,12 +902,44 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
 
                             fireRects.append(QRectF(x * tileWidth, y * tileHeight, tileWidth, tileHeight));
 
-                            // 随机选择火焰图片（fireland_1 / fireland_2 / fireland_3）
-                            int r = QRandomGenerator::global()->bounded(3);
-                            QString firePath = QString(":/images/fireland_%1.png").arg(r + 1);
+                            // 八方向邻居检测
+                            bool hasUp = (y > 0 && ((dataArr[(y-1) * mapWidth + x].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasDown = (y + 1 < mapHeight && ((dataArr[(y+1) * mapWidth + x].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasLeft = (x > 0 && ((dataArr[y * mapWidth + (x-1)].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasRight = (x + 1 < mapWidth && ((dataArr[y * mapWidth + (x+1)].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasUpLeft = (y > 0 && x > 0 && ((dataArr[(y-1) * mapWidth + (x-1)].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasUpRight = (y > 0 && x + 1 < mapWidth && ((dataArr[(y-1) * mapWidth + (x+1)].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasDownLeft = (y + 1 < mapHeight && x > 0 && ((dataArr[(y+1) * mapWidth + (x-1)].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasDownRight = (y + 1 < mapHeight && x + 1 < mapWidth && ((dataArr[(y+1) * mapWidth + (x+1)].toInt() & 0x1FFFFFFF) != 0));
+                            int dirCount = (hasUp?1:0)+(hasDown?1:0)+(hasLeft?1:0)+(hasRight?1:0);
+
+                            QString firePath;
+                            if (dirCount == 3) {
+                                if (!hasUp) firePath = ":/images/fireland_north.png";
+                                else if (!hasDown) firePath = ":/images/fireland_south.png";
+                                else if (!hasLeft) firePath = ":/images/fireland_west.png";
+                                else if (!hasRight) firePath = ":/images/fireland_east.png";
+                            } else if (dirCount == 2) {
+                                bool ulE = !hasUp && !hasLeft, dlE = !hasDown && !hasLeft;
+                                bool drE = !hasDown && !hasRight, urE = !hasUp && !hasRight;
+                                if (ulE) firePath = ":/images/fireland_northwest_1.png";
+                                else if (dlE) firePath = ":/images/fireland_southwest_1.png";
+                                else if (drE) firePath = ":/images/fireland_southeast_1.png";
+                                else if (urE) firePath = ":/images/fireland_northeast_1.png";
+                                else { int r = QRandomGenerator::global()->bounded(3); firePath = QString(":/images/fireland_%1.png").arg(r+1); }
+                            } else if (dirCount == 4) {
+                                if (!hasUpLeft) firePath = ":/images/fireland_northwest_2.png";
+                                else if (!hasDownLeft) firePath = ":/images/fireland_southwest_2.png";
+                                else if (!hasUpRight) firePath = ":/images/fireland_northeast_2.png";
+                                else if (!hasDownRight) firePath = ":/images/fireland_southeast_2.png";
+                                else { int r = QRandomGenerator::global()->bounded(3); firePath = QString(":/images/fireland_%1.png").arg(r+1); }
+                            } else {
+                                int r = QRandomGenerator::global()->bounded(3);
+                                firePath = QString(":/images/fireland_%1.png").arg(r+1);
+                            }
 
                             Tile *fireTile = new Tile(firePath, x * tileWidth, y * tileHeight, QSize(tileWidth, tileHeight));
-                            fireTile->setZValue(-4);  // 火焰与草地同层
+                            fireTile->setZValue(-4);
                             scene->addItem(fireTile);
                             fireCount++;
                         }
@@ -934,6 +1053,53 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                                     finalPath = ":/images/grass_3.png";
                                 }
                             }
+                        }
+                        // 桌子图层：方向自动检测 + 碰撞
+                        else if (layerName == "tabel") {
+                            bool hasUp = (y > 0 && ((dataArr[(y-1) * mapWidth + x].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasDown = (y + 1 < mapHeight && ((dataArr[(y+1) * mapWidth + x].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasLeft = (x > 0 && ((dataArr[y * mapWidth + (x-1)].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasRight = (x + 1 < mapWidth && ((dataArr[y * mapWidth + (x+1)].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasUpLeft = (y > 0 && x > 0 && ((dataArr[(y-1) * mapWidth + (x-1)].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasUpRight = (y > 0 && x + 1 < mapWidth && ((dataArr[(y-1) * mapWidth + (x+1)].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasDownLeft = (y + 1 < mapHeight && x > 0 && ((dataArr[(y+1) * mapWidth + (x-1)].toInt() & 0x1FFFFFFF) != 0));
+                            bool hasDownRight = (y + 1 < mapHeight && x + 1 < mapWidth && ((dataArr[(y+1) * mapWidth + (x+1)].toInt() & 0x1FFFFFFF) != 0));
+                            int dirCount = (hasUp?1:0)+(hasDown?1:0)+(hasLeft?1:0)+(hasRight?1:0);
+                            if (dirCount == 3) {
+                                if (!hasUp) finalPath = ":/images/tabel_north.png";
+                                else if (!hasDown) finalPath = ":/images/tabel_south.png";
+                                else if (!hasLeft) finalPath = ":/images/tabel_west.png";
+                                else if (!hasRight) finalPath = ":/images/tabel_east.png";
+                            } else if (dirCount == 2) {
+                                bool ulE = !hasUp && !hasLeft, dlE = !hasDown && !hasLeft;
+                                bool drE = !hasDown && !hasRight, urE = !hasUp && !hasRight;
+                                if (ulE) finalPath = ":/images/tabel_northwest.png";
+                                else if (dlE) finalPath = ":/images/tabel_southwest.png";
+                                else if (drE) finalPath = ":/images/tabel_southeast.png";
+                                else if (urE) finalPath = ":/images/tabel_northeast.png";
+                                else { int r = QRandomGenerator::global()->bounded(100); finalPath = QString(":/images/tabel_%1.png").arg(r<70?1:r<85?2:3); }
+                            } else if (dirCount == 4) {
+                                if (!hasUpLeft) finalPath = ":/images/tabel_northwest.png";
+                                else if (!hasDownLeft) finalPath = ":/images/tabel_southwest.png";
+                                else if (!hasUpRight) finalPath = ":/images/tabel_northeast.png";
+                                else if (!hasDownRight) finalPath = ":/images/tabel_southeast.png";
+                                else { int r = QRandomGenerator::global()->bounded(100); finalPath = QString(":/images/tabel_%1.png").arg(r<70?1:r<85?2:3); }
+                            } else {
+                                int r = QRandomGenerator::global()->bounded(100);
+                                finalPath = QString(":/images/tabel_%1.png").arg(r<70?1:r<85?2:3);
+                            }
+                            Tile *tile = new Tile(finalPath, x * tileWidth, y * tileHeight, fixedSize);
+                            scene->addItem(tile);
+                            tileMap->addWallTile(tile);
+                            tileCount++;
+                            continue;
+                        }
+                        // 装饰物图层：随机 decoration_1/2/3
+                        else if (layerName == "decorations") {
+                            int r = QRandomGenerator::global()->bounded(100);
+                            if (r < 20) finalPath = ":/images/decoration_1.png";
+                            else if (r < 60) finalPath = ":/images/decoration_2.png";
+                            else finalPath = ":/images/decoration_3.png";
                         }
                         // 宝箱图层：加入 chests 列表
                         else if (layerName == "chest") {
@@ -1122,12 +1288,81 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                 qreal s = static_cast<qreal>(pxSz) / pm.width();
                 item->setTransform(QTransform::fromScale(s, s));
                 item->setPos(pxX, pxY);
-                item->setZValue(500);
+                item->setZValue(502);
                 item->setOpacity(1.0);  // 默认完全可见
                 scene->addItem(item);
                 treeOverlays.append(item);
             }
             qDebug() << "[Tree] Placed" << trees.size() << "trees around garden perimeter";
+        }
+
+        // ===== winter_tree：围绕区域2(gateway)左半边边缘（仅上下左，无中间分界）=====
+        {
+            struct Pt { int x, y; };
+            QVector<Pt> wperim;
+            for (int x = 158; x <= 179; x++) wperim.append({x, 34});  // 上
+            for (int x = 179; x >= 158; x--) wperim.append({x, 47});   // 下
+            for (int y = 46; y >= 35; y--)  wperim.append({158, y});   // 左
+
+            int wspacing = QRandomGenerator::global()->bounded(2, 6);
+            int wstep = 0;
+            for (const auto &pt : wperim) {
+                if (wstep >= wspacing) {
+                    wstep = 0;
+                    wspacing = QRandomGenerator::global()->bounded(2, 6);
+                    int sz = 5 + QRandomGenerator::global()->bounded(5) * 2;
+                    QPixmap pm(":/images/winter_tree.png");
+                    if (!pm.isNull()) {
+                        int pxSz = sz * ts;
+                        auto *item = new QGraphicsPixmapItem();
+                        item->setPixmap(pm);
+                        item->setTransformationMode(Qt::SmoothTransformation);
+                        qreal s = static_cast<qreal>(sz * ts) / pm.width();
+                        item->setTransform(QTransform::fromScale(s, s));
+                        item->setPos((pt.x - sz/2) * ts, (pt.y - sz/2) * ts);
+                        item->setZValue(502);
+                        item->setOpacity(0.75);
+                        scene->addItem(item);
+                        gatewayTrees.append(item);
+                    }
+                }
+                wstep++;
+            }
+        // 强制 (153,41) 15×15 winter_tree
+        { QPixmap pm(":/images/winter_tree.png"); if (!pm.isNull()) { auto *item = new QGraphicsPixmapItem(); item->setPixmap(pm); item->setTransformationMode(Qt::SmoothTransformation); qreal s = static_cast<qreal>(15*32)/pm.width(); item->setTransform(QTransform::fromScale(s,s)); item->setPos((153-7)*32, (41-7)*32); item->setZValue(502); scene->addItem(item); gatewayTrees.append(item); } }
+        }
+
+        // ===== tree：区域2(gateway)右半边边缘（仅上下右，无中间分界）=====
+        {
+            struct Pt { int x, y; };
+            QVector<Pt> rperim;
+            for (int x = 180; x <= 201; x++) rperim.append({x, 34});  // 上
+            for (int y = 35; y <= 46; y++)  rperim.append({201, y});   // 右
+            for (int x = 200; x >= 180; x--) rperim.append({x, 47});   // 下
+
+            int tsp = QRandomGenerator::global()->bounded(2, 6);
+            int stp = 0;
+            for (const auto &pt : rperim) {
+                if (stp >= tsp) {
+                    stp = 0; tsp = QRandomGenerator::global()->bounded(2, 6);
+                    int sz = 5 + QRandomGenerator::global()->bounded(5) * 2;
+                    QPixmap pm(":/images/tree.png");
+                    if (!pm.isNull()) {
+                        auto *item = new QGraphicsPixmapItem();
+                        item->setPixmap(pm);
+                        item->setTransformationMode(Qt::SmoothTransformation);
+                        qreal s = static_cast<qreal>(sz * ts) / pm.width();
+                        item->setTransform(QTransform::fromScale(s, s));
+                        item->setPos((pt.x - sz/2) * ts, (pt.y - sz/2) * ts);
+                        item->setZValue(502);
+                        item->setOpacity(0.75);
+                        scene->addItem(item);
+                        gatewayTrees.append(item);
+                    }
+                }
+                stp++;
+            }
+            qDebug() << "[Tree] Placed around gateway right-half perimeter";
         }
 
         // ===== 雾：放大到区域3(maze)最长边1.2倍，置于区域3正中央 =====
@@ -1155,19 +1390,175 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
             }
         }
 
-        // ===== fog_dark：39×39 半透明，放在 tile(149,36) =====
+        // ===== winter_tree：39×39 中心在 (155,40) =====
         {
-            QPixmap pm(":/images/fog_dark.png");
+            QPixmap pm(":/images/winter_tree.png");
             if (!pm.isNull()) {
                 auto *item = new QGraphicsPixmapItem();
                 int sz = 39 * 32;
                 item->setPixmap(pm.scaled(sz, sz, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
                 item->setTransformationMode(Qt::SmoothTransformation);
-                item->setPos(149 * 32, 36 * 32);
-                item->setZValue(500);
-                item->setOpacity(0.4);
+                item->setZValue(502);
+                item->setOpacity(0.6);
+                scene->addItem(item);
+                gatewayTrees.append(item);  // 纳入统一管理
+            }
+        }
+
+        // ===== autumn_tree：区域2中间1/3上下边缘 =====
+        {
+            QPixmap pm(":/images/autumn_tree.png");
+            if (!pm.isNull()) {
+                int spc = QRandomGenerator::global()->bounded(2, 6), stp = 0;
+                for (int x = 173; x <= 186; x++) {
+                    for (int y : {34, 47}) {
+                        if (stp >= spc) {
+                            stp = 0; spc = QRandomGenerator::global()->bounded(2, 6);
+                            int sz = 5 + QRandomGenerator::global()->bounded(5) * 2;
+                            auto *item = new QGraphicsPixmapItem();
+                            item->setPixmap(pm);
+                            item->setTransformationMode(Qt::SmoothTransformation);
+                        qreal s = static_cast<qreal>(sz * ts) / pm.width();
+                            item->setTransform(QTransform::fromScale(s,s));
+                            item->setPos((x-sz/2)*ts, (y-sz/2)*ts);
+                            item->setZValue(502);
+                            item->setOpacity(1.0);
+                            scene->addItem(item);
+                            gatewayTrees.append(item);
+                        }
+                        stp++;
+                    }
+                }
+            }
+            qDebug() << "[AutumnTree] Placed on gateway middle-third top/bottom";
+        }
+
+        // ===== winter_tree：区域3(maze)周围，距离3 =====
+        {
+            struct Pt { int x, y; };
+            QVector<Pt> mPerim;
+            // maze: 120,25~151,46，距离3 → 外延3格
+            for (int x = 117; x <= 154; x++) mPerim.append({x, 22});   // 上 (25-3)
+            for (int y = 25; y <= 46; y++)  mPerim.append({154, y});    // 右 (151+3)
+            for (int x = 153; x >= 117; x--) mPerim.append({x, 49});    // 下 (46+3)
+            for (int y = 46; y >= 25; y--)  mPerim.append({117, y});    // 左 (120-3)
+            int sp2 = QRandomGenerator::global()->bounded(2, 6), sc2 = 0;
+            for (const auto &pt : mPerim) {
+                if (sc2 >= sp2) {
+                    sc2 = 0; sp2 = QRandomGenerator::global()->bounded(2, 6);
+                    int sz = 5 + QRandomGenerator::global()->bounded(5) * 2;
+                    QPixmap pm(":/images/winter_tree.png");
+                    if (!pm.isNull()) {
+                        auto *item = new QGraphicsPixmapItem();
+                        item->setPixmap(pm);
+                        item->setTransformationMode(Qt::SmoothTransformation);
+                        qreal s = static_cast<qreal>(sz * ts) / pm.width();
+                        item->setTransform(QTransform::fromScale(s,s));
+                        item->setPos((pt.x-sz/2)*ts, (pt.y-sz/2)*ts);
+                        item->setZValue(502);
+                        item->setOpacity(0.75);
+                        scene->addItem(item);
+                    }
+                }
+                sc2++;
+            }
+            qDebug() << "[WinterTree] Placed around maze perimeter (distance 3)";
+        }
+
+        // ===== 展示图：lion(120,70) cat(150,70) 7(180,70)，长边25格 =====
+        {
+            struct { QString path; int cx, cy; } shows[] = {
+                {":/images/show_lion.png", 150, 70},
+                {":/images/show_cat.png",  180, 70},
+                {":/images/show7.png",     210, 70},
+            };
+            for (auto &sh : shows) {
+                QPixmap pm(sh.path);
+                if (pm.isNull()) continue;
+                qreal targetLen = 25.0 * 32;  // 800px
+                qreal s = targetLen / qMax(pm.width(), pm.height());
+                int w = (int)(pm.width() * s), h = (int)(pm.height() * s);
+                auto *item = new QGraphicsPixmapItem(pm.scaled(w, h, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                item->setTransformationMode(Qt::SmoothTransformation);
+                item->setPos(sh.cx * 32 - w/2, sh.cy * 32 - h/2);
+                item->setZValue(503);
                 scene->addItem(item);
             }
+        }
+
+        // ===== (155,43) 19×19 范围内 winter_tree 透明度 25% =====
+        {
+            qreal cx = 155.0 * ts, cy = 43.0 * ts;
+            qreal half = 9.5 * ts;
+            for (auto *t : gatewayTrees) {
+                QPointF ic = t->sceneBoundingRect().center();
+                if (ic.x() > cx-half && ic.x() < cx+half && ic.y() > cy-half && ic.y() < cy+half)
+                    t->setOpacity(0.25);
+            }
+        }
+
+        // ===== gateway_better_roof：覆盖 gateway_better (159,35) 42×12 =====
+        {
+            QPixmap pm(":/images/gateway_better_roof.png");
+            if (!pm.isNull()) {
+                auto *item = new QGraphicsPixmapItem();
+                int pxW = 42 * ts, pxH = 12 * ts;
+                item->setPixmap(pm);
+                item->setTransformationMode(Qt::SmoothTransformation);
+                item->setTransform(QTransform::fromScale((qreal)pxW/pm.width(), (qreal)pxH/pm.height()));
+                item->setPos(159 * ts, 35 * ts);
+                item->setZValue(501);
+                item->setOpacity(1.0);
+                scene->addItem(item);
+                gatewayRoof = item;
+            }
+        }
+        // ===== school_secret_place_roof：覆盖 secret_place (241,58) 50×20 =====
+        {
+            QPixmap pm(":/images/school_secret_place_roof.png");
+            if (!pm.isNull()) {
+                auto *item = new QGraphicsPixmapItem();
+                int pxW = 50 * ts, pxH = 20 * ts;
+                item->setPixmap(pm);
+                item->setTransformationMode(Qt::SmoothTransformation);
+                item->setTransform(QTransform::fromScale((qreal)pxW/pm.width(), (qreal)pxH/pm.height()));
+                item->setPos(241 * ts, 58 * ts);
+                item->setZValue(501);
+                item->setOpacity(1.0);
+                scene->addItem(item);
+                secretRoof = item;
+            }
+        }
+        // ===== tree：围绕区域4(secret 241,58~290,77)一圈 =====
+        {
+            struct Pt { int x, y; };
+            QVector<Pt> sPerim;
+            for (int x = 240; x <= 291; x++) sPerim.append({x, 57});   // 上
+            for (int y = 58; y <= 77; y++)  sPerim.append({291, y});    // 右
+            for (int x = 290; x >= 240; x--) sPerim.append({x, 78});    // 下
+            for (int y = 77; y >= 58; y--)  sPerim.append({240, y});    // 左
+            int sp = QRandomGenerator::global()->bounded(2, 6), sc = 0;
+            for (const auto &pt : sPerim) {
+                if (sc >= sp) {
+                    sc = 0; sp = QRandomGenerator::global()->bounded(2, 6);
+                    int sz = 5 + QRandomGenerator::global()->bounded(5) * 2;
+                    QPixmap pm(":/images/tree.png");
+                    if (!pm.isNull()) {
+                        auto *item = new QGraphicsPixmapItem();
+                        item->setPixmap(pm);
+                        item->setTransformationMode(Qt::SmoothTransformation);
+                        qreal s = static_cast<qreal>(sz * ts) / pm.width();
+                        item->setTransform(QTransform::fromScale(s, s));
+                        item->setPos((pt.x - sz/2) * ts, (pt.y - sz/2) * ts);
+                        item->setZValue(502);
+                        item->setOpacity(0.75);
+                        scene->addItem(item);
+                        secretTrees.append(item);
+                    }
+                }
+                sc++;
+            }
+            qDebug() << "[Tree] Placed around secret perimeter";
         }
 
         // ===== 特殊传送门漩涡：(161,40)入口 + (149,40)出口 =====
@@ -1244,7 +1635,7 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                 for (int dx = -r; dx <= r; dx++) {
                     if (qAbs(dx) != r && qAbs(dy) != r) continue; // 只检查当前环
                     QPointF test(pos.x() + dx * ts, pos.y() + dy * ts);
-                    QRectF tr(test.x(), test.y(), 40, 40);
+                    QRectF tr(test.x() - 48, test.y() - 48, 96, 96);  // 3×3 居中
                     if (!tileMap->collidesWithWall(tr) && !tileMap->collidesWithWater(tr))
                         return test;
                 }
@@ -1320,6 +1711,7 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     // 如果不是主菜单状态（即游戏进行中），创建右上角菜单按钮
     if (!isMainMenuActive) {
         createGameMenuButton();
+        createSkillBar();
     }
     } // !debugMapView
 
@@ -1332,6 +1724,8 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     gameTimer->start(16);
     qDebug() << "[loadMap] Game timer started (16ms interval).";
 
+    // 停止加载脉冲
+    if (loadingPulseTimer) { loadingPulseTimer->stop(); delete loadingPulseTimer; loadingPulseTimer = nullptr; }
     qDebug() << "[loadMap] Map loading completed.";
 }
 
@@ -1394,7 +1788,31 @@ void Game::keyPressEvent(QKeyEvent *event)
     case Qt::Key_I: if (!debugMapView && !isNearPortal()) skillMeteorBurst(); break;
     case Qt::Key_H: if (!debugMapView && !isNearPortal()) skillTriangleShot(); break;
     case Qt::Key_N: if (!debugMapView && !isNearPortal()) skillBlueBurst(); break;
-    case Qt::Key_J: if (!debugMapView && !isNearPortal()) skillNormalAttack(); break;
+    case Qt::Key_J:
+        if (!debugMapView && !isNearPortal() && player) {
+            if (player->getEnhanced()) {
+                bool moving = upPressed || downPressed || leftPressed || rightPressed;
+                if (moving && !jPlaying) {
+                    // 跑动中按J：bright版，不中断移动，用skillNormalAttack逻辑
+                    player->playCastAnimation(":/images/player_enhanced_pugong_bright.gif", 2, 77);
+                    skillNormalAttack();  // 火圈+伤害
+                } else if (!moving) {
+                    // 静止：连击系统
+                    if (jPressCount >= 4) break;
+                    jPressCount++;
+                    jPressTimer = J_PRESS_WINDOW;
+                    jRushDir = (upPressed||downPressed||leftPressed||rightPressed) ? getCurrentDirectionVector() : lastMoveDir;
+                    if (!jPlaying) {
+                        jPlaying = true;
+                        jPlayIndex = -1;
+                        upPressed = downPressed = leftPressed = rightPressed = false;
+                    }
+                }
+            } else {
+                skillNormalAttack();
+            }
+        }
+        break;
     case Qt::Key_K: if (!debugMapView && !isNearPortal()) skillFlashBlade(); break;
     case Qt::Key_L: if (!debugMapView && !isNearPortal()) skillShieldActivate(); break;
     case Qt::Key_O:
@@ -1416,6 +1834,10 @@ void Game::keyPressEvent(QKeyEvent *event)
         zoomLevel /= ZOOM_STEP;
         if (zoomLevel < MIN_ZOOM) zoomLevel = MIN_ZOOM;
         applyZoom();
+        break;
+    case Qt::Key_F2:
+        skillBarVisible = !skillBarVisible;
+        updateSkillBarPosition();
         break;
     case Qt::Key_F1:
         debugMapView = !debugMapView;
@@ -1456,6 +1878,7 @@ void Game::mousePressEvent(QMouseEvent *event)
     // ========== 主菜单点击 ==========
     if (isMainMenuActive) {
         if (mainMenuStartItem && mainMenuStartItem->contains(mainMenuStartItem->mapFromScene(scenePos))) {
+            startLoadingPulse();
             startGame();
         } else if (mainMenuAboutItem && mainMenuAboutItem->contains(mainMenuAboutItem->mapFromScene(scenePos))) {
             QMessageBox::information(this, "关于", "Qt-Gaming 演示游戏\n版本 2.0\n\n组队作业项目");
@@ -1525,15 +1948,8 @@ void Game::updateGame()
             if (next >= 1.0) {
                 // 全黑：传送 + 缩/放
                 player->setPos(portalDest.x(), portalDest.y());
-                if (portalShrink) {
-                    player->setEnhanced(false);
-                    player->setLevel(1);
-                    player->setTiny(true);
-                } else {
-                    player->setTiny(false);
-                    player->setLevel(2);
-                    player->setEnhanced(true);
-                }
+                // 仅改变体型，不改变等级/HP/MP/增强状态
+                player->setTiny(portalShrink);
                 centerOn(player);
                 portalTransitionPhase = 2;
             }
@@ -1599,8 +2015,52 @@ void Game::updateGame()
     // 地图切换期间玩家/地图可能为空
     if (!player || !tileMap || !scene) return;
 
+    // ========== 突进平滑移动（pugong_rush）==========
+    if (rushDashing && player) {
+        player->setPos(player->pos() + rushStep);
+        if (tileMap && tileMap->collidesWithWall(player->hitboxRect()))
+            player->setPos(player->pos() - rushStep);
+        rushFramesLeft--;
+        if (rushFramesLeft <= 0) rushDashing = false;
+    }
+
     // ========== 受伤定身倒计时 ==========
     if (stunTimer > 0) stunTimer--;
+
+    // J 连击：窗口计时
+    if (jPressTimer > 0) jPressTimer--;
+    // J 连击播放中：一个接一个播放
+    if (jPlaying && player) {
+        if (!player->isCastingNow()) {
+            jPlayIndex++;
+            if (jPlayIndex >= jPressCount) {
+                // 全部播完，恢复站立
+                jPlaying = false;
+                jPressCount = 0;
+                jPlayIndex = 0;
+                player->clearCastState();
+            } else {
+                QString gif;
+                if (jPlayIndex == 0)      gif = ":/images/player_enhanced_pugong_bright.gif";
+                else if (jPlayIndex == 1) gif = ":/images/player_enhanced_pugong2_bright.gif";
+                else if (jPlayIndex == 2) gif = ":/images/player_enhanced_pugong3_bright.gif";
+                else {
+                    gif = ":/images/player_enhanced_pugong_rush_bright.gif";
+                    // 平滑突进（类似K闪现）
+                    rushDashing = true;
+                    rushFramesLeft = 8;
+                    rushStep = jRushDir * (96.0 / 8.0);  // 3格
+                }
+                int interval = (jPlayIndex == 3) ? 1 : 2;
+                player->playCastAnimation(gif, interval, 77, true);
+                // 每击火圈+伤害
+                skillNormalAttack();
+            }
+        }
+    }
+    if (jPlaying || jPressTimer > 0) {
+        if (!jPlaying) {} // still counting, allow movement? No, block during combo window too
+    }
 
     // ========== 加速技能冷却 ==========
     if (speedBoostTimer > 0) {
@@ -1614,16 +2074,34 @@ void Game::updateGame()
         player->setPos(player->pos() + flashState.step);
         flashState.framesLeft--;
 
-        // 每帧生成一个红色残影
-        QGraphicsEllipseItem *dot = new QGraphicsEllipseItem(-4, -4, 8, 8);
-        dot->setPos(player->sceneBoundingRect().center());
-        dot->setBrush(QBrush(QColor(255, 50, 50, 200)));
-        dot->setPen(Qt::NoPen);
-        scene->addItem(dot);
-        QTimer::singleShot(200, [dot]() { delete dot; });
+        // 增强形态闪现：玩家身上播放 rush_jumb GIF
+        if (player->getEnhanced() && qAbs(flashState.bladeDir.x()) > 0.01) {
+            static QVector<QPixmap> rushFrames;
+            static bool rushLoaded = false;
+            if (!rushLoaded) {
+                QImageReader reader(":/images/player_enhanced_k_rush_jumb_bright.gif");
+                while (reader.canRead()) { QImage img = reader.read(); if (!img.isNull()) rushFrames.append(QPixmap::fromImage(img).scaled(77,77,Qt::KeepAspectRatio,Qt::SmoothTransformation)); }
+                rushLoaded = true;
+            }
+            if (!rushFrames.isEmpty()) {
+                int idx = (20 - flashState.framesLeft) % rushFrames.size();
+                QPixmap frame = rushFrames[idx];
+                if (flashState.bladeDir.x() < 0) frame = frame.transformed(QTransform::fromScale(-1,1), Qt::SmoothTransformation);
+                player->setPixmap(frame);
+                player->setTransform(QTransform());
+            }
+        } else {
+            // 垂直闪现：白光残影
+            QGraphicsEllipseItem *dot = new QGraphicsEllipseItem(-4, -4, 8, 8);
+            dot->setPos(player->sceneBoundingRect().center());
+            dot->setBrush(QBrush(QColor(255, 255, 255, 200)));
+            dot->setPen(Qt::NoPen);
+            scene->addItem(dot);
+            QTimer::singleShot(200, [dot]() { delete dot; });
+        }
 
         if (flashState.framesLeft <= 0) {
-            // 闪现结束，校正到最终位置
+            // 闪现结束，校正到最终位置（动画由movie自动恢复）
             flashState.active = false;
             player->setPos(flashState.finalPos);
 
@@ -1656,11 +2134,12 @@ void Game::updateGame()
     // 正常移动
     else if (player) {
         QPointF oldPos = player->pos();
-        // 定身期间禁止移动
-        if (stunTimer > 0) {
+        // 定身/J连击/突进期间禁止移动
+        if (stunTimer > 0 || jPlaying || rushDashing) {
             player->move(false, false, false, false);
         } else {
             player->move(upPressed, downPressed, leftPressed, rightPressed);
+            if (upPressed||downPressed||leftPressed||rightPressed) lastMoveDir = getCurrentDirectionVector();
         }
         // ========== 新增：水碰撞回退 ==========
         if (tileMap->collidesWithWater(player->hitboxRect())) {
@@ -1691,11 +2170,34 @@ void Game::updateGame()
 
                 // 雾：进入迷宫(region 3) → 目标 0.5，离开 → 目标 0（10s渐变）
                 fogTargetOpacity = (newId == 3) ? 0.5 : 0.0;
-                // 树：离开花园(region 1) → 透明度降至 0.4，进入 → 恢复 1.0
-                if (prevId == 1 && newId != 1) {
-                    for (auto *t : treeOverlays) t->setOpacity(0.4);
-                } else if (newId == 1 && prevId != 1) {
+
+                // === 树可见性 ===
+                bool in24 = (newId == 2 || newId == 4);
+                bool was24 = (prevId == 2 || prevId == 4);
+                if (in24 && !was24) {
+                    // 进入区域2/4：所有树几乎看不见
+                    for (auto *t : treeOverlays) t->setOpacity(0.1);
+                    for (auto *t : gatewayTrees) t->setOpacity(0.1);
+                    for (auto *t : secretTrees) t->setOpacity(0.1);
+                    if (gatewayRoof) gatewayRoof->setOpacity(0.0);
+                    if (secretRoof) secretRoof->setOpacity(0.0);
+                } else if (!in24 && was24) {
+                    // 离开区域2/4：恢复
                     for (auto *t : treeOverlays) t->setOpacity(1.0);
+                    for (auto *t : gatewayTrees) t->setOpacity(0.5);
+                    for (auto *t : secretTrees) t->setOpacity(0.75);
+                    if (gatewayRoof) gatewayRoof->setOpacity(1.0);
+                    if (secretRoof) secretRoof->setOpacity(1.0);
+                }
+                // 区域4特殊：进入时 gatewayTrees→0.3, secretTrees→0.1
+                if (newId == 4 && prevId != 4) {
+                    for (auto *t : gatewayTrees) t->setOpacity(0.3);
+                }
+                // 区域1特殊
+                if (newId == 1 && prevId != 1) {
+                    for (auto *t : treeOverlays) t->setOpacity(1.0);
+                } else if (prevId == 1 && newId != 1 && newId != 2 && newId != 4) {
+                    for (auto *t : treeOverlays) t->setOpacity(0.4);
                 }
             }
         }
@@ -1768,7 +2270,9 @@ void Game::updateGame()
     updateMinimap();            // ← 更新小地图红点位置
     updateDiamonds();           // ← 钻石动画与碰撞
     updatePetals();             // ← 梅花瓣/暴风雪粒子
+    if (currentMapPath.contains("lianda")) updateDangerZones();  // 西南联大地图机制
     updateGameMenuButtonPosition();
+    updateSkillBarPosition();
     // 紫钻 buff：更新头顶十字位置，到期移除
     if (attackBuffTimer > 0) {
         attackBuffTimer--;
@@ -1899,9 +2403,7 @@ void Game::updateProjectiles()
         }
 
         if (!alive) {
-            if (explosionsEnabled) {
-                createExplosion(p->sceneBoundingRect().center());
-            }
+            createExplosion(p->sceneBoundingRect().center());
             delete p;
             projectiles.removeAt(i);
         }
@@ -2016,31 +2518,8 @@ void Game::skillTriangleShot()
 
 void Game::createExplosion(QPointF centerPos)
 {
+    qDebug() << "[Bomb] createExplosion called, frames=" << g_bombFrames.size();
     if (!scene || g_bombFrames.isEmpty()) return;
-
-    QGraphicsPixmapItem *item = new QGraphicsPixmapItem();
-    item->setTransformationMode(Qt::SmoothTransformation);
-    scene->addItem(item);
-    item->setPos(centerPos.x() - 48, centerPos.y() - 48);
-    item->setPixmap(g_bombFrames[0]);
-
-    QTimer *timer = new QTimer(this);
-    int *frameIdx = new int(0);
-
-    connect(timer, &QTimer::timeout, [timer, item, frameIdx]() {
-        (*frameIdx)++;
-        if (*frameIdx >= g_bombFrames.size()) {
-            timer->stop();
-            timer->deleteLater();
-            if (item->scene()) item->scene()->removeItem(item);
-            delete item;
-            delete frameIdx;
-            return;
-        }
-        item->setPixmap(g_bombFrames[*frameIdx]);
-    });
-
-    timer->start(8); // 8ms 一帧，约 125fps
 }
 
 QPointF Game::getCurrentDirectionVector()
@@ -2126,7 +2605,7 @@ void Game::skillFlashBlade()
     QPointF dir = getCurrentDirectionVector();
 
     // ========== 2. 计算闪现目标位置（步进法，不能穿墙）==========
-    qreal flashDistance = 100.0; // 最大闪现距离
+    qreal flashDistance = 200.0; // 最大闪现距离
     qreal step = 4.0;            // 每步检测 4 像素
     QPointF oldPos = player->pos(); // 闪现前左上角
     QPointF currentPos = oldPos;
@@ -2173,7 +2652,7 @@ void Game::skillFlashBlade()
     }
 
     // ========== 4. 设置跨帧闪现状态 ==========
-    const int FLASH_FRAMES = 5;
+    const int FLASH_FRAMES = 20;
     flashState.active = true;
     flashState.step = (finalPos - oldPos) / FLASH_FRAMES;
     flashState.framesLeft = FLASH_FRAMES;
@@ -2246,11 +2725,6 @@ void Game::skillNormalAttack()
 {
     if (!player || !scene) return;
 
-    // 变身形态下播放普攻施法动画
-    if (player->getEnhanced()) {
-        player->playCastAnimation(":/images/player_enhanced_pugong.gif");
-    }
-
     // ========== 1. 九宫格攻击范围 ==========
     QPointF playerCenter = player->sceneBoundingRect().center();
     QRectF attackRect(playerCenter.x() - 48.0, playerCenter.y() - 48.0, 96.0, 96.0);
@@ -2264,7 +2738,7 @@ void Game::skillNormalAttack()
     connect(hitMovie, &QMovie::frameChanged, [hitItem, hitMovie](int) {
         QPixmap frame = hitMovie->currentPixmap();
         if (!frame.isNull()) {
-            frame = frame.scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            frame = frame.scaled(144, 144, Qt::KeepAspectRatio, Qt::SmoothTransformation);
             hitItem->setPixmap(frame);
         }
     });
@@ -2583,6 +3057,12 @@ void Game::spawnDiamonds()
         for (int attempt = 0; attempt < 20; attempt++) {
             int gx = QRandomGenerator::global()->bounded(2, mw - 2);
             int gy = QRandomGenerator::global()->bounded(2, mh - 2);
+            // 只在四个区域内生成
+            bool inRegion = (gx >= 204 && gx < 256 && gy >= 10 && gy < 52)   // 1-garden
+                         || (gx >= 159 && gx < 201 && gy >= 35 && gy < 47)   // 2-gateway
+                         || (gx >= 120 && gx < 152 && gy >= 25 && gy < 47)   // 3-maze
+                         || (gx >= 241 && gx < 291 && gy >= 58 && gy < 78);  // 4-secret
+            if (!inRegion) continue;
             QRectF testRect(gx * ts, gy * ts, ts, ts);
             if (!tileMap->collidesWithWall(testRect) && !tileMap->collidesWithWater(testRect)) {
                 int type = QRandomGenerator::global()->bounded(3);
@@ -2594,7 +3074,6 @@ void Game::spawnDiamonds()
                 item->setPos(gx * ts, gy * ts);
                 item->setZValue(6);
                 item->setTransformationMode(Qt::SmoothTransformation);
-                scene->addItem(item);
                 diamonds.append({item, type});
                 break;
             }
@@ -2970,7 +3449,7 @@ void Game::playTransformAnimation()
     transformMovie = new QMovie(":/images/player_tranform.gif");
     transformItem = new QGraphicsPixmapItem();
     transformItem->setTransformationMode(Qt::SmoothTransformation);
-    transformItem->setZValue(999999);  // 绝对最上层
+    transformItem->setZValue(10000000);  // 绝对顶层，高于bomb(999999)
     scene->addItem(transformItem);
 
     // 以玩家为中心显示（场景坐标）
@@ -3100,9 +3579,9 @@ void Game::performTeleport(const Portal &portal)
 
     // ----- 安全传送辅助函数（自动对齐碰撞框并防卡墙）-----
     auto safeTeleportTo = [&](const QPointF &targetCenter) {
-        // 玩家显示 96×96，碰撞框为最下排正中 32×32，中心偏移 (48, 80)
+        // 玩家显示 64×64，碰撞框为右下角 32×32，中心偏移 (48, 48)
         const int COLLISION_CENTER_OFFSET_X = 48;
-        const int COLLISION_CENTER_OFFSET_Y = 80;
+        const int COLLISION_CENTER_OFFSET_Y = 48;
         QPointF basePos = targetCenter - QPointF(COLLISION_CENTER_OFFSET_X, COLLISION_CENTER_OFFSET_Y);
         player->setPos(basePos);
 
@@ -3375,4 +3854,78 @@ int Game::removeDoorRegion(Tile *startDoor)
 
     qDebug() << "Removed" << removedCount << "connected door tiles with one key.";
     return removedCount;
+}
+
+// ========== 西南联大机制：定时轰炸区域 ==========
+void Game::updateDangerZones()
+{
+    if (!player || !scene) return;
+
+    // 每15秒在玩家位置生成一个危险区域
+    dangerSpawnTimer++;
+    if (dangerSpawnTimer >= DANGER_INTERVAL) {
+        dangerSpawnTimer = 0;
+        DangerZone dz;
+        dz.pos = player->sceneBoundingRect().center();
+        dz.lifetime = DANGER_LIFETIME;
+        dz.radius = 240;  // 15 tiles / 2
+        // 随机漂移方向
+        qreal angle = QRandomGenerator::global()->bounded(360) * M_PI / 180.0;
+        dz.driftVel = QPointF(qCos(angle) * 0.5, qSin(angle) * 0.5);
+
+        int r = dz.radius;
+        // 红色圆
+        dz.circle = new QGraphicsEllipseItem(-r, -r, r*2, r*2);
+        dz.circle->setPen(QPen(QColor(255, 40, 40, 220), 3));
+        dz.circle->setBrush(QBrush(QColor(255, 0, 0, 30)));
+        dz.circle->setPos(dz.pos);
+        dz.circle->setZValue(50);
+        scene->addItem(dz.circle);
+
+        // 叉号 X：两条对角线
+        dz.cross1 = new QGraphicsLineItem(-r*0.7, -r*0.7, r*0.7, r*0.7);
+        dz.cross1->setPen(QPen(QColor(255, 40, 40, 220), 3));
+        dz.cross1->setPos(dz.pos);
+        dz.cross1->setZValue(51);
+        scene->addItem(dz.cross1);
+
+        dz.cross2 = new QGraphicsLineItem(r*0.7, -r*0.7, -r*0.7, r*0.7);
+        dz.cross2->setPen(QPen(QColor(255, 40, 40, 220), 3));
+        dz.cross2->setPos(dz.pos);
+        dz.cross2->setZValue(51);
+        scene->addItem(dz.cross2);
+
+        dangerZones.append(dz);
+        qDebug() << "[DangerZone] Spawned at" << dz.pos;
+    }
+
+    // 更新所有危险区域
+    for (int i = dangerZones.size() - 1; i >= 0; --i) {
+        DangerZone &dz = dangerZones[i];
+        dz.lifetime--;
+
+        // 缓慢漂移
+        dz.pos += dz.driftVel;
+        if (dz.circle) dz.circle->setPos(dz.pos);
+        if (dz.cross1) dz.cross1->setPos(dz.pos);
+        if (dz.cross2) dz.cross2->setPos(dz.pos);
+
+        // 时间到：爆炸
+        if (dz.lifetime <= 0) {
+            // 爆炸效果
+            createExplosion(dz.pos);
+            // 判定玩家是否在范围内：扣20%最大血量
+            QRectF playerRect = player->hitboxRect();
+            QRectF dangerRect(dz.pos.x() - dz.radius, dz.pos.y() - dz.radius, dz.radius*2, dz.radius*2);
+            if (playerRect.intersects(dangerRect)) {
+                int dmg = player->getMaxHp() * 0.2;
+                if (dmg < 1) dmg = 1;
+                player->takeDamage(dmg);
+                qDebug() << "[DangerZone] HIT! Player took" << dmg << "damage";
+            }
+            // 清理
+            delete dz.circle; delete dz.cross1; delete dz.cross2;
+            dangerZones.removeAt(i);
+        }
+    }
 }
