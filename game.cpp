@@ -20,6 +20,8 @@
 #include <QMessageBox>
 #include <QApplication>
 #include <QDialog>
+#include <QMediaPlayer>
+#include <QAudioOutput>
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QTextBrowser>
@@ -163,6 +165,11 @@ Game::Game(QWidget *parent)
     loadFireHitFrames();
     loadRushJumbFrames();
     preloadMonsterFrames();
+
+    // ========== 初始化音频系统 ==========
+    bgmPlaylist = QStringList{
+        "qrc:/bgms/background_BGM.mp3"
+    };
 
     // 显示主菜单（不加载地图）
     setupEmptyScene();
@@ -1767,6 +1774,10 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
 
     // 停止加载脉冲
     if (loadingPulseTimer) { loadingPulseTimer->stop(); delete loadingPulseTimer; loadingPulseTimer = nullptr; }
+
+    // 地图加载完毕，播放随机BGM
+    playRandomBgm();
+
     qDebug() << "[loadMap] Map loading completed.";
 }
 
@@ -1863,6 +1874,7 @@ void Game::keyPressEvent(QKeyEvent *event)
         player->setSpeed(8.0);
         speedBoostTimer = SPEED_BOOST_DURATION;
         speedCooldownTimer = SPEED_COOLDOWN + SPEED_BOOST_DURATION;
+        playSfx("qrc:/bgms/kenney_interface-sounds/Audio/maximize_008.ogg", 0.3);
         qDebug() << "Speed boost ON for 5s";
         break;
     case Qt::Key_Plus:
@@ -1918,6 +1930,7 @@ void Game::mousePressEvent(QMouseEvent *event)
 
     // ========== 主菜单点击 ==========
     if (isMainMenuActive) {
+        playSfx("qrc:/bgms/mixkit-retro-arcade-casino-notification-211.wav", 0.3);
         if (mainMenuStartItem && mainMenuStartItem->contains(mainMenuStartItem->mapFromScene(scenePos))) {
             startLoadingPulse();
             startGame();
@@ -1931,6 +1944,7 @@ void Game::mousePressEvent(QMouseEvent *event)
 
     // ========== 游戏内菜单点击 ==========
     if (isGameMenuActive) {
+        playSfx("qrc:/bgms/mixkit-retro-arcade-casino-notification-211.wav", 0.3);
         if (gameMenuContinueItem && gameMenuContinueItem->contains(gameMenuContinueItem->mapFromScene(scenePos))) {
             hideGameMenu();
         } else if (gameMenuAboutItem && gameMenuAboutItem->contains(gameMenuAboutItem->mapFromScene(scenePos))) {
@@ -2034,6 +2048,8 @@ void Game::updateGame()
             upPressed = downPressed = leftPressed = rightPressed = false;
             qDebug() << "[Portal] (149,40) → (161,40) expand";
         }
+        // 任一传送触发时播放音效
+        if (portalTransitionActive) playSfx("qrc:/bgms/kenney_interface-sounds/Audio/glass_003.ogg", 0.25);
     }
 
     // ========== 调试模式：纯地图查看，WASD 滚屏 ==========
@@ -2348,6 +2364,7 @@ void Game::skillMeteorBurst()
     // I技能：不移动时才能使用（先检查方向，再扣蓝）
     if (upPressed || downPressed || leftPressed || rightPressed) return;
     if (!player->consumeMp(10)) return; // 消耗 10 MP，不足则无法释放
+    playSfx("qrc:/bgms/kenney_interface-sounds/Audio/glitch_001.ogg", 0.3);
 
     // 变身形态下播放飞火施法动画（间隔1帧，更快）
     if (player->getEnhanced()) {
@@ -2389,6 +2406,7 @@ void Game::skillMeteorBurst()
 void Game::skillBlueBurst()
 {
     if (!player) return;
+    playSfx("qrc:/bgms/mixkit-arcade-retro-jump-223.wav", 0.3);  // N 月牙八刃
 
     // H键：普攻2，蓝色八方向月牙子弹，可边移动边发射
     QPointF center = player->sceneBoundingRect().center();
@@ -2537,6 +2555,7 @@ void Game::updateTriangleProjectiles()
 void Game::skillTriangleShot()
 {
     if (!player) return;
+    playSfx("qrc:/bgms/kenney_interface-sounds/Audio/select_007.ogg", 0.25);
 
     QPointF dir = getCurrentDirectionVector();
     qreal speed = 10.0;
@@ -2554,6 +2573,7 @@ void Game::createExplosion(QPointF centerPos, int size)
 {
     qDebug() << "[Bomb] createExplosion called, frames=" << g_bombFrames.size() << "size=" << size;
     if (!scene || g_bombFrames.isEmpty()) return;
+    playSfx("qrc:/bgms/explosion-01.mp3", 0.3);  // 爆炸
 
     // 创建爆炸动画项
     QGraphicsPixmapItem *bombItem = new QGraphicsPixmapItem();
@@ -2611,6 +2631,7 @@ void Game::skillFlashBlade()
 {
     if (!player || !tileMap) return;
     if (flashState.active) return; // 闪现中不能再次使用
+    playSfx("qrc:/bgms/mixkit-martial-arts-punch-2052.wav", 0.3);  // K 瞬影浪斩
 
     // ========== 静止时按 K：回血技能（红色+字上升消失）==========
     if (!upPressed && !downPressed && !leftPressed && !rightPressed) {
@@ -2786,6 +2807,7 @@ void Game::updateDaolangWaves()
 void Game::skillNormalAttack()
 {
     if (!player || !scene) return;
+    playSfx("qrc:/bgms/mixkit-martial-arts-punch-2052.wav", 0.35);  // J 八面炼狱
 
     // ========== 1. 九宫格攻击范围 ==========
     QPointF playerCenter = player->sceneBoundingRect().center();
@@ -2794,7 +2816,7 @@ void Game::skillNormalAttack()
     // ========== 2. 普攻 GIF 特效（预加载帧，持续 2 秒后消失）==========
     QGraphicsPixmapItem *hitItem = new QGraphicsPixmapItem();
     hitItem->setTransformationMode(Qt::SmoothTransformation);
-    hitItem->setZValue(50);
+    hitItem->setZValue(1);  // 在玩家(Z=2)和怪物(Z=5)下方，不遮挡
     scene->addItem(hitItem);
     hitItem->setPos(playerCenter.x() - 72, playerCenter.y() - 72);
 
@@ -2837,6 +2859,7 @@ void Game::skillShieldActivate()
 {
     if (!player || !scene || shieldItem) return;
     if (!player->consumeMp(5)) return; // 开启玄武盾消耗 5 MP
+    playSfx("qrc:/bgms/kenney_interface-sounds/Audio/maximize_006.ogg", 0.3);
 
     // 创建玄武盾：比玩家稍大的圆形（半径 28px）
     shieldItem = new QGraphicsEllipseItem(-28, -28, 56, 56);
@@ -3156,6 +3179,7 @@ void Game::updateDiamonds()
             scene->removeItem(d.item);
             delete d.item;
             diamonds.removeAt(i);
+            playSfx("qrc:/bgms/mixkit-winning-a-coin-video-game-2069.wav", 0.3);  // 拾取钻石
 
             if (type == 0) {
                 // 红钻石：补血 25 + 红十字特效
@@ -3500,7 +3524,7 @@ void Game::applyLevel10Enhancement()
 void Game::playTransformAnimation()
 {
     if (!scene || !player) return;
-
+    playSfx("qrc:/bgms/mixkit-game-level-completed-2059.wav", 0.25);  // 变身动画
     gamePaused = true;
     transformMovie = new QMovie(":/images/player_tranform.gif");
     transformItem = new QGraphicsPixmapItem();
@@ -3557,6 +3581,7 @@ void Game::updateEnemyProjectiles()
             } else {
                 player->takeDamage(ep->getDamage());
                 stunTimer = STUN_DURATION;  // 定身 0.2s
+                playSfx("qrc:/bgms/mixkit-game-blood-pop-slide-2363.wav", 0.3);  // 玩家受击
                 qDebug() << "Player hit by enemy! Damage:" << ep->getDamage() << "Stunned.";
 
                 // 生成 4 个紫色"-"号旋转上升
@@ -3808,6 +3833,7 @@ void Game::checkInteractions()
                 if (removed > 0) {
                     keyCount -= 1.0f;
                     updateKeyDisplay();
+                    playSfx("qrc:/bgms/mixkit-unlock-game-notification-253.wav", 0.3);  // 开门
                     qDebug() << "Door region opened! Keys left:" << keyCount;
                     // 开门特效
                     QPointF regionCenter = doorRect.center();
@@ -3830,6 +3856,7 @@ void Game::checkInteractions()
 void Game::openChest(Tile *chest)
 {
     keyCount += 0.25f;
+    playSfx("qrc:/bgms/mixkit-winning-a-coin-video-game-2069.wav", 0.3);  // 开箱/捡宝石
     qDebug() << "Chest opened! Keys:" << keyCount;
 
     // 可选：播放简易开箱特效（金色闪光）
@@ -3952,6 +3979,7 @@ void Game::updateDangerZones()
         scene->addItem(dz.cross2);
 
         dangerZones.append(dz);
+        playSfx("qrc:/bgms/mixkit-arcade-rising-231.wav", 0.3);  // 红圈出现警告
         qDebug() << "[DangerZone] Spawned at" << dz.pos;
     }
 
@@ -3968,7 +3996,7 @@ void Game::updateDangerZones()
 
         // 时间到：爆炸
         if (dz.lifetime <= 0) {
-            // 爆炸效果
+            // 爆炸效果（createExplosion 内部播放音效）
             createExplosion(dz.pos, dz.radius * 2);  // 与红圈同大小 (480px)
             // 判定玩家是否在范围内：扣20%最大血量
             QRectF playerRect = player->hitboxRect();
@@ -3984,4 +4012,41 @@ void Game::updateDangerZones()
             dangerZones.removeAt(i);
         }
     }
+}
+
+// ========== 音频系统 ==========
+
+void Game::playRandomBgm()
+{
+    if (bgmPlaylist.isEmpty()) return;
+    if (!bgmPlayer) {
+        bgmPlayer = new QMediaPlayer(this);
+        QAudioOutput *audioOut = new QAudioOutput(this);
+        audioOut->setVolume(0.45);
+        bgmPlayer->setAudioOutput(audioOut);
+    }
+    int idx = 0;
+    if (bgmPlaylist.size() > 1) {
+        do {
+            idx = QRandomGenerator::global()->bounded(bgmPlaylist.size());
+        } while (bgmPlayer->source().toString() == bgmPlaylist[idx]);
+    }
+    bgmPlayer->setSource(QUrl(bgmPlaylist[idx]));
+    bgmPlayer->setLoops(QMediaPlayer::Infinite);
+    bgmPlayer->play();
+    qDebug() << "[BGM] Playing (loop)" << bgmPlaylist[idx];
+}
+
+void Game::playSfx(const QString &path, qreal vol)
+{
+    if (path.isEmpty()) return;
+    QMediaPlayer *sfx = new QMediaPlayer(this);
+    QAudioOutput *audioOut = new QAudioOutput(this);
+    audioOut->setVolume(qBound(0.0, vol, 1.0));
+    sfx->setAudioOutput(audioOut);
+    sfx->setSource(QUrl(path));
+    connect(sfx, &QMediaPlayer::playbackStateChanged, [sfx](QMediaPlayer::PlaybackState s) {
+        if (s == QMediaPlayer::StoppedState) sfx->deleteLater();
+    });
+    sfx->play();
 }

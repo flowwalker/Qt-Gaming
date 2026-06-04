@@ -238,5 +238,22 @@
         <file>images/water_southwest_1.png</file>
         <file>images/water_southwest_2.png</file>
         <file>images/water_west.png</file>
+        <file>bgms/background_BGM.mp3</file>
+        <file>bgms/kenney_impact-sounds/Audio/impactMining_000.ogg</file>
+        <file>bgms/explosion-01.mp3</file>
+        <file>bgms/kenney_interface-sounds/Audio/glass_003.ogg</file>
+        <file>bgms/kenney_interface-sounds/Audio/glitch_001.ogg</file>
+        <file>bgms/kenney_interface-sounds/Audio/select_007.ogg</file>
+        <file>bgms/kenney_interface-sounds/Audio/maximize_006.ogg</file>
+        <file>bgms/kenney_interface-sounds/Audio/maximize_008.ogg</file>
+        <file>bgms/mixkit-arcade-rising-231.wav</file>
+        <file>bgms/mixkit-winning-a-coin-video-game-2069.wav</file>
+        <file>bgms/mixkit-game-level-completed-2059.wav</file>
+        <file>bgms/mixkit-extra-bonus-in-a-video-game-2045.wav</file>
+        <file>bgms/mixkit-game-blood-pop-slide-2363.wav</file>
+        <file>bgms/mixkit-arcade-retro-jump-223.wav</file>
+        <file>bgms/mixkit-martial-arts-punch-2052.wav</file>
+        <file>bgms/mixkit-retro-arcade-casino-notification-211.wav</file>
+        <file>bgms/mixkit-unlock-game-notification-253.wav</file>
     </qresource>
 </RCC>

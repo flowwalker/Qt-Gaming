@@ -21,6 +21,8 @@ class EnemyProjectile;
 class Spawner;
 class Pet;
 class QMovie;
+class QMediaPlayer;
+class QAudioOutput;
 
 class Game : public QGraphicsView
 {
@@ -353,6 +355,12 @@ private:
     void showIntroDialog(const QString &mapKey); // 显示介绍对话框，参数为地图标识
     bool waitingForIntro = false;    // 是否等待玩家离开传送门以显示介绍
     QString waitingIntroMap;         // 等待显示介绍的地图路径
+
+    // ========== 音频系统 ==========
+    QMediaPlayer *bgmPlayer = nullptr;
+    QStringList bgmPlaylist;                      // 三首BGM候选
+    void playRandomBgm();                         // 随机选一首BGM播放
+    void playSfx(const QString &path, qreal vol = 0.7);  // 播放短音效
 };
 
 #endif // GAME_H

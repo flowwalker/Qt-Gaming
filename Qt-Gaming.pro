@@ -1,6 +1,6 @@
 TEMPLATE = app
 TARGET = Qt-Gaming
-QT += widgets
+QT += widgets multimedia
 RESOURCES += resources.qrc
 
 SOURCES += \
