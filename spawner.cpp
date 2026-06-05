@@ -67,9 +67,8 @@ void Spawner::doSpawn()
 {
     if (!game || !m_scene) return;
 
-    // 限制场上怪物数量，超过阈值不再生成
-    const int MAX_ENEMIES = 10;
-    if (game->getEnemyCount() >= MAX_ENEMIES) {
+    // 限制场上怪物数量，超过阈值不再生成（西南联大=3，其他=10）
+    if (game->getEnemyCount() >= game->getMaxEnemies()) {
         return;
     }
 

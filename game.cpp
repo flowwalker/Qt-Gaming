@@ -900,6 +900,8 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
                             if (cleanGid == 0) continue;
                             // 只取 30%，减少地图固定怪物密度
                             if (QRandomGenerator::global()->bounded(100) >= 30) continue;
+                            // 西南联大限制最多3只
+                            if (mapFilePath.contains("lianda") && enemyCount >= 3) break;
                             Enemy *enemy = new Enemy(tileMap, scene,
                                                      QPointF(x * tileWidth, y * tileHeight),
                                                      this);
@@ -1961,8 +1963,15 @@ void Game::keyPressEvent(QKeyEvent *event)
     case Qt::Key_L: if (!debugMapView && !isNearPortal()) skillShieldActivate(); break;
     case Qt::Key_O:
         if (debugMapView) break;
-        if (speedCooldownTimer > 0 || speedBoostTimer > 0) break;
         if (!player) break;
+        // 西南联大：无冷却，无限加速
+        if (currentMapPath.contains("lianda")) {
+            player->setSpeed(8.0);
+            speedBoostTimer = SPEED_BOOST_DURATION;
+            playSfx("qrc:/bgms/kenney_interface-sounds/Audio/maximize_008.ogg", 0.3);
+            break;
+        }
+        if (speedCooldownTimer > 0 || speedBoostTimer > 0) break;
         player->setSpeed(8.0);
         speedBoostTimer = SPEED_BOOST_DURATION;
         speedCooldownTimer = SPEED_COOLDOWN + SPEED_BOOST_DURATION;
@@ -3641,6 +3650,11 @@ bool Game::isNearPortal() const
         if (nearRect.intersects(p.rect)) return true;
     }
     return false;
+}
+
+int Game::getMaxEnemies() const
+{
+    return currentMapPath.contains("lianda") ? 3 : 10;
 }
 
 void Game::addEnemyProjectile(EnemyProjectile *ep)

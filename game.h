@@ -43,6 +43,7 @@ public:
     void addEnemy(Enemy *e);
     /** 获取当前场上敌人数量 */
     int getEnemyCount() const { return enemies.size(); }
+    int getMaxEnemies() const;  // 西南联大=3，其他=10
 
 // game.h 中的 private slots 部分
 private slots:
