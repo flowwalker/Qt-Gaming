@@ -192,6 +192,23 @@ private:
     static const int DANGER_LIFETIME = 150;   // 2.5秒
     void updateDangerZones();
 
+    // ========== 西南联大任务系统 ==========
+    bool liandaMissionActive = false;     // 任务地图已加载
+    bool liandaMissionStarted = false;    // 玩家点击"开始探索"后才开始计时
+    int liandaElapsedFrames = 0;          // 已过帧数（仅在 started 后计数）
+    static const int LIANDA_BGM_DURATION = 5400;  // 1分30秒 = 90s × 60fps
+    QGraphicsSimpleTextItem *liandaTimerText = nullptr;  // 顶部倒计时
+    // ========== 西南联大文字序列 ==========
+    int liandaTextIndex = 0;                         // 当前显示到第几句
+    int liandaTextTimer = 0;                         // 距离下一句的计时
+    static const int LIANDA_TEXT_INTERVAL = 180;     // 3秒 × 60fps = 180帧/句
+    QGraphicsSimpleTextItem *liandaStoryText = nullptr;  // 屏幕中央叙事文字
+    QGraphicsRectItem *liandaStoryBg = nullptr;           // 文字背景框
+    QVector<QGraphicsEllipseItem*> liandaChestDots;       // 小地图宝箱标记点
+    void checkLiandaMission();            // 检查胜利/失败条件
+    void showLiandaVictory();             // 胜利：闪光→跳转主地图
+    void showLiandaDefeat();              // 失败：黑屏红字→跳转主地图
+
     // ========== J 连击系统（增强形态）==========
     int jPressCount = 0;          // 短时间内按 J 的次数 (1~4)
     int jPressTimer = 0;          // 松开后倒计时，归零时播放连击

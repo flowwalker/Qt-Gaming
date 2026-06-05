@@ -496,6 +496,11 @@ Game::~Game()
     if (hudText) { delete hudText; hudText = nullptr; }
     if (hudLevelText) { delete hudLevelText; hudLevelText = nullptr; }
     if (hudKeyText) delete hudKeyText;
+    if (liandaTimerText) { delete liandaTimerText; liandaTimerText = nullptr; }
+    if (liandaStoryText) { delete liandaStoryText; liandaStoryText = nullptr; }
+    if (liandaStoryBg) { delete liandaStoryBg; liandaStoryBg = nullptr; }
+    for (auto *dot : liandaChestDots) { if (dot) delete dot; }
+    liandaChestDots.clear();
     if (minimapItem) { delete minimapItem; minimapItem = nullptr; }
     if (minimapDot)  { delete minimapDot;  minimapDot  = nullptr; }
     if (minimapPosText) { delete minimapPosText; minimapPosText = nullptr; }
@@ -539,7 +544,7 @@ static QMap<QString, IntroConfig> buildIntroMap() {
     };
     map[":/maps/lianda.tmj"] = {
         "西南联大",
-        "西南联大，战火中的教育奇迹。\n\n无数先辈在此求学，为中华崛起而奋斗。",
+        "你需要在游戏音乐播放结束前完成西南联大地图40个宝箱（key=10）的采集，\n\n里面藏着是对我们拯救危机存亡关头的至关重要的机密和知识，\n\n随着音乐进行爆炸将会越来越频繁，\n\n你越来越需要使用闪现来逃脱日本空军无情的轰炸和战争残魂的追击，\n\n冲刺吧！攻城狮，拯救这个危机存亡时代下的中国！",
         ":/images/player.png"
     };
     map[":/maps/Weiming_lake.tmj"] = {
@@ -623,10 +628,19 @@ void Game::checkAndShowIntro()
 
     // 其他地图：只有当该地图未被介绍过，并且是从校史馆传送过来，且玩家已离开传送门范围
     if (!introShownForTargetMaps.contains(currentMap)) {
-        // 判断是否从校史馆传送过来的：我们可以在跨地图传送时记录一个标志
-        // 简单方案：检查当前地图是目标地图，且之前没有介绍，且玩家不在任何传送门附近（即已离开）
-        // 为了避免重复判断，我们在 performTeleport 中设置一个标志 waitingForIntro
-        // 下面实现该标志
+        // 西南联大：立即显示任务提示（不需要等待离开传送门）
+        if (currentMap.contains("lianda")) {
+            if (player->pos() != QPointF(0,0) && !isTeleporting && liandaMissionActive && !liandaMissionStarted) {
+                introShownForTargetMaps.insert(currentMap);
+                waitingForIntro = false;
+                showIntroDialog(currentMap);
+                // 玩家点击"开始探索"后，正式开始计时和BGM
+                liandaMissionStarted = true;
+                playRandomBgm();
+                qDebug() << "[Lianda] Mission started! Player clicked begin.";
+            }
+            return;
+        }
         if (waitingForIntro && waitingIntroMap == currentMap) {
             if (!isNearPortal()) {
                 waitingForIntro = false;
@@ -765,6 +779,11 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     if (hudText) { delete hudText; hudText = nullptr; }
     if (hudLevelText) { delete hudLevelText; hudLevelText = nullptr; }
     if (hudKeyText) { delete hudKeyText; hudKeyText = nullptr; }
+    if (liandaTimerText) { delete liandaTimerText; liandaTimerText = nullptr; }
+    if (liandaStoryText) { delete liandaStoryText; liandaStoryText = nullptr; }
+    if (liandaStoryBg) { delete liandaStoryBg; liandaStoryBg = nullptr; }
+    for (auto *dot : liandaChestDots) { if (dot) delete dot; }
+    liandaChestDots.clear();
     if (minimapItem) { delete minimapItem; minimapItem = nullptr; }
     if (minimapDot)  { delete minimapDot;  minimapDot  = nullptr; }
     if (minimapPosText) { delete minimapPosText; minimapPosText = nullptr; }
@@ -1778,6 +1797,79 @@ void Game::loadMap(const QString &mapFilePath, bool useStartPoint)
     // 地图加载完毕，播放随机BGM
     playRandomBgm();
 
+    // ========== 西南联大任务初始化 ==========
+    if (mapFilePath.contains("lianda")) {
+        liandaMissionActive = true;
+        liandaMissionStarted = false;   // 等待玩家点击"开始探索"
+        liandaElapsedFrames = 0;
+        liandaTextIndex = 0;
+        liandaTextTimer = 0;
+        // 创建顶部红色倒计时
+        if (!liandaTimerText) {
+            liandaTimerText = new QGraphicsSimpleTextItem();
+            QFont tf;
+            tf.setPointSize(18);
+            tf.setBold(true);
+            liandaTimerText->setFont(tf);
+            liandaTimerText->setBrush(QBrush(QColor(255, 40, 40)));
+            liandaTimerText->setZValue(2000);
+            scene->addItem(liandaTimerText);
+        }
+        // 创建屏幕中央叙事文字
+        if (!liandaStoryText) {
+            liandaStoryText = new QGraphicsSimpleTextItem();
+            QFont sf;
+            sf.setPointSize(16);
+            sf.setBold(true);
+            liandaStoryText->setFont(sf);
+            liandaStoryText->setBrush(QBrush(QColor(255, 50, 30, 0)));  // 红色文字，初始透明
+            liandaStoryText->setZValue(2001);
+            scene->addItem(liandaStoryText);
+        }
+        if (!liandaStoryBg) {
+            liandaStoryBg = new QGraphicsRectItem();
+            liandaStoryBg->setBrush(QBrush(QColor(0, 0, 0, 0)));  // 初始透明
+            liandaStoryBg->setPen(QPen(QColor(80, 20, 20, 0), 2));  // 暗红边框
+            liandaStoryBg->setZValue(2000);
+            scene->addItem(liandaStoryBg);
+        }
+        // 创建小地图宝箱标记点（12组2×2，位置在updateMinimap中更新）
+        for (auto *dot : liandaChestDots) { if (dot) delete dot; }
+        liandaChestDots.clear();
+        {
+            for (int i = 0; i < 12; i++) {
+                auto *dot = new QGraphicsEllipseItem(-2, -2, 4, 4);
+                dot->setBrush(QBrush(QColor(255, 215, 0)));  // 金色
+                dot->setPen(QPen(Qt::white, 1));
+                dot->setZValue(1002);
+                dot->setVisible(false);  // 等小地图创建后再显示
+                scene->addItem(dot);
+                liandaChestDots.append(dot);
+            }
+        }
+        qDebug() << "[Lianda] Mission ready! BGM duration:" << LIANDA_BGM_DURATION << "frames";
+    } else {
+        liandaMissionActive = false;
+        liandaMissionStarted = false;
+        for (auto *dot : liandaChestDots) { if (dot) { if (dot->scene()) dot->scene()->removeItem(dot); delete dot; } }
+        liandaChestDots.clear();
+        if (liandaTimerText) {
+            if (liandaTimerText->scene()) liandaTimerText->scene()->removeItem(liandaTimerText);
+            delete liandaTimerText;
+            liandaTimerText = nullptr;
+        }
+        if (liandaStoryText) {
+            if (liandaStoryText->scene()) liandaStoryText->scene()->removeItem(liandaStoryText);
+            delete liandaStoryText;
+            liandaStoryText = nullptr;
+        }
+        if (liandaStoryBg) {
+            if (liandaStoryBg->scene()) liandaStoryBg->scene()->removeItem(liandaStoryBg);
+            delete liandaStoryBg;
+            liandaStoryBg = nullptr;
+        }
+    }
+
     qDebug() << "[loadMap] Map loading completed.";
 }
 
@@ -2321,6 +2413,95 @@ void Game::updateGame()
     updateDiamonds();           // ← 钻石动画与碰撞
     updatePetals();             // ← 梅花瓣/暴风雪粒子
     if (currentMapPath.contains("lianda")) updateDangerZones();  // 西南联大地图机制
+    // ========== 西南联大任务计时与胜负检测 ==========
+    if (liandaMissionActive && liandaMissionStarted) {
+        liandaElapsedFrames++;
+        // 更新顶部红色倒计时
+        if (liandaTimerText) {
+            int remainingSecs = qMax(0, (LIANDA_BGM_DURATION - liandaElapsedFrames) / 60);
+            int mins = remainingSecs / 60;
+            int secs = remainingSecs % 60;
+            liandaTimerText->setText(QString("⏱ %1:%2").arg(mins).arg(secs, 2, 10, QChar('0')));
+            QRectF vr = mapToScene(viewport()->rect()).boundingRect();
+            liandaTimerText->setPos(vr.center().x() - liandaTimerText->boundingRect().width()/2, vr.top() + 10);
+        }
+
+        // ========== 文字序列：20句叙事按时间顺序出现 ==========
+        {
+            static const char* liandaTexts[] = {
+                "警报撕裂长空，敌机疯狂咆哮。",
+                "暴雨般的炸弹倾泻而下，昆明瞬间沦为烈火地狱。",
+                "茅草校舍化作废墟，漫天都是焦黑的书页在飞舞。",
+                "但在这毁灭的中心，少年们从瓦砾中再度站起。",
+                "擦干额角的鲜血，他们眼中的怒火比硝烟更烫。",
+                "\"区区炸弹，也想炸断我华夏五千年的命脉？！\"",
+                "恐惧在这一刻燃尽，血脉中的战魂彻底觉醒。",
+                "没了屋檐遮蔽，这苍穹大地便是他们的战场。",
+                "荒山野岭间，他们以膝为桌，向命运发起逆袭。",
+                "草棚寒风刺骨，却压不住他们推演公式的呐喊。",
+                "哪怕食不果腹，他们脑海中的真理也在疯狂暴涨。",
+                "摇曳的煤油灯光，在此刻化作刺破黑夜的终极锋芒。",
+                "他们手里的笔，就是重塑山河、弑杀黑暗的神兵。",
+                "每一行手抄的文献，都是向这残酷世界挥出的重拳。",
+                "赌上全部的青春与生命，也绝不向时代低头。",
+                "纵使肉身寂灭，华夏少年的脊梁也绝不弯曲。",
+                "既然黑夜沉重如铁，那便由我们化身为烈阳！",
+                "这跨越生死的拼搏，是我们对苦难最崇高的叛逆！",
+                "待到烽火散尽，中华必将再度屹立于寰宇之巅。",
+                "以命为墨，以血为誓，强行改写这诸天山河的命运！"
+            };
+            const int totalTexts = 20;
+
+            liandaTextTimer++;
+            // 每3秒(180帧)切换一句
+            if (liandaTextTimer >= LIANDA_TEXT_INTERVAL) {
+                liandaTextTimer = 0;
+                if (liandaTextIndex < totalTexts) {
+                    liandaTextIndex++;
+                }
+            }
+
+            if (liandaStoryText && liandaStoryBg && liandaTextIndex > 0 && liandaTextIndex <= totalTexts) {
+                // 显示当前句子
+                liandaStoryText->setText(QString::fromUtf8(liandaTexts[liandaTextIndex - 1]));
+
+                // 计算淡入淡出：前30帧淡入，后30帧淡出
+                int frameInSentence = liandaTextTimer;
+                int alpha = 255;
+                if (frameInSentence < 30) {
+                    alpha = frameInSentence * 255 / 30;           // 0→255 淡入
+                } else if (frameInSentence > LIANDA_TEXT_INTERVAL - 30) {
+                    alpha = (LIANDA_TEXT_INTERVAL - frameInSentence) * 255 / 30; // 255→0 淡出
+                }
+                alpha = qBound(0, alpha, 255);
+
+                QColor textColor(255, 50, 30, alpha);
+                liandaStoryText->setBrush(QBrush(textColor));
+                liandaStoryText->setOpacity(1.0);
+
+                // 居中定位
+                QRectF vr = mapToScene(viewport()->rect()).boundingRect();
+                QRectF textRect = liandaStoryText->boundingRect();
+                qreal textW = textRect.width();
+                qreal textH = textRect.height();
+                qreal padX = 30, padY = 15;
+                liandaStoryText->setPos(vr.center().x() - textW/2, vr.center().y() - textH/2);
+
+                // 背景框
+                liandaStoryBg->setRect(textRect.translated(liandaStoryText->pos()).adjusted(-padX, -padY, padX, padY));
+                liandaStoryBg->setBrush(QBrush(QColor(0, 0, 0, alpha * 180 / 255)));
+                liandaStoryBg->setPen(QPen(QColor(80, 20, 20, alpha), 2));
+                liandaStoryBg->setOpacity(1.0);
+            } else if (liandaStoryText && liandaStoryBg) {
+                // 所有文字播完或还没开始，隐藏
+                liandaStoryText->setBrush(QBrush(QColor(255, 50, 30, 0)));
+                liandaStoryBg->setBrush(QBrush(QColor(0, 0, 0, 0)));
+                liandaStoryBg->setPen(QPen(QColor(80, 20, 20, 0), 2));
+            }
+        }
+
+        checkLiandaMission();
+    }
     updateGameMenuButtonPosition();
     updateSkillBarPosition();
     // 紫钻 buff：更新头顶十字位置，到期移除
@@ -2573,7 +2754,7 @@ void Game::createExplosion(QPointF centerPos, int size)
 {
     qDebug() << "[Bomb] createExplosion called, frames=" << g_bombFrames.size() << "size=" << size;
     if (!scene || g_bombFrames.isEmpty()) return;
-    playSfx("qrc:/bgms/explosion-01.mp3", 0.3);  // 爆炸
+    playSfx("qrc:/bgms/explosion-01.mp3", currentMapPath.contains("lianda") ? 0.2 : 0.3);  // 爆炸
 
     // 创建爆炸动画项
     QGraphicsPixmapItem *bombItem = new QGraphicsPixmapItem();
@@ -2631,7 +2812,7 @@ void Game::skillFlashBlade()
 {
     if (!player || !tileMap) return;
     if (flashState.active) return; // 闪现中不能再次使用
-    playSfx("qrc:/bgms/mixkit-martial-arts-punch-2052.wav", 0.3);  // K 瞬影浪斩
+    playSfx("qrc:/bgms/mixkit-martial-arts-punch-2052.wav", 0.45);  // K 瞬影浪斩
 
     // ========== 静止时按 K：回血技能（红色+字上升消失）==========
     if (!upPressed && !downPressed && !leftPressed && !rightPressed) {
@@ -2807,7 +2988,7 @@ void Game::updateDaolangWaves()
 void Game::skillNormalAttack()
 {
     if (!player || !scene) return;
-    playSfx("qrc:/bgms/mixkit-martial-arts-punch-2052.wav", 0.35);  // J 八面炼狱
+    playSfx("qrc:/bgms/mixkit-martial-arts-punch-2052.wav", 0.5);  // J 八面炼狱
 
     // ========== 1. 九宫格攻击范围 ==========
     QPointF playerCenter = player->sceneBoundingRect().center();
@@ -2859,7 +3040,7 @@ void Game::skillShieldActivate()
 {
     if (!player || !scene || shieldItem) return;
     if (!player->consumeMp(5)) return; // 开启玄武盾消耗 5 MP
-    playSfx("qrc:/bgms/kenney_interface-sounds/Audio/maximize_006.ogg", 0.3);
+    playSfx("qrc:/bgms/kenney_interface-sounds/Audio/maximize_006.ogg", 0.45);  // L 玄武盾
 
     // 创建玄武盾：比玩家稍大的圆形（半径 28px）
     shieldItem = new QGraphicsEllipseItem(-28, -28, 56, 56);
@@ -3102,6 +3283,22 @@ void Game::updateMinimap()
     QPointF pc = player->sceneBoundingRect().center();
     minimapDot->setPos(mmPos.x() + pc.x() * scale,
                        mmPos.y() + pc.y() * scale);
+
+    // ========== 西南联大宝箱标记点 ==========
+    if (!liandaChestDots.isEmpty()) {
+        const int chestGroupTileCoords[12][2] = {
+            {193, 4},  {364, 4},  {167, 20}, {323, 39},
+            {123, 73}, {178, 85}, {117, 162},{329, 193},
+            {112, 221},{91, 280}, {305, 290},{219, 375}
+        };
+        int ts = tileMap->getTileWidth();
+        for (int i = 0; i < liandaChestDots.size() && i < 12; i++) {
+            qreal cx = chestGroupTileCoords[i][0] * ts + ts;  // 2×2中心
+            qreal cy = chestGroupTileCoords[i][1] * ts + ts;
+            liandaChestDots[i]->setPos(mmPos.x() + cx * scale, mmPos.y() + cy * scale);
+            liandaChestDots[i]->setVisible(true);
+        }
+    }
 
     // 实时坐标：用碰撞框中心（即角色实际所站 tile）
     if (minimapPosText) {
@@ -3939,18 +4136,25 @@ int Game::removeDoorRegion(Tile *startDoor)
     return removedCount;
 }
 
-// ========== 西南联大机制：定时轰炸区域 ==========
+// ========== 西南联大机制：定时轰炸区域（频率随BGM进度线性递增）==========
 void Game::updateDangerZones()
 {
     if (!player || !scene) return;
 
-    // 每15秒在玩家位置生成一个危险区域
+    // 根据BGM进度线性缩放：越接近结束，轰炸越频繁
+    // 进度 0→1：间隔 180→90 帧(3s→1.5s)，持续时间 150→80 帧(2.5s→1.3s)
+    qreal progress = (qreal)liandaElapsedFrames / LIANDA_BGM_DURATION;
+    if (progress > 1.0) progress = 1.0;
+    int dynamicInterval = qMax(90, (int)(180 - 90 * progress));
+    int dynamicLifetime = qMax(80, (int)(150 - 70 * progress));
+
+    // 在玩家位置生成危险区域
     dangerSpawnTimer++;
-    if (dangerSpawnTimer >= DANGER_INTERVAL) {
+    if (dangerSpawnTimer >= dynamicInterval) {
         dangerSpawnTimer = 0;
         DangerZone dz;
         dz.pos = player->sceneBoundingRect().center();
-        dz.lifetime = DANGER_LIFETIME;
+        dz.lifetime = dynamicLifetime;
         dz.radius = 240;  // 15 tiles / 2
         // 随机漂移方向
         qreal angle = QRandomGenerator::global()->bounded(360) * M_PI / 180.0;
@@ -3979,7 +4183,7 @@ void Game::updateDangerZones()
         scene->addItem(dz.cross2);
 
         dangerZones.append(dz);
-        playSfx("qrc:/bgms/mixkit-arcade-rising-231.wav", 0.3);  // 红圈出现警告
+        playSfx("qrc:/bgms/mixkit-arcade-rising-231.wav", 0.15);  // 红圈出现警告
         qDebug() << "[DangerZone] Spawned at" << dz.pos;
     }
 
@@ -4014,27 +4218,147 @@ void Game::updateDangerZones()
     }
 }
 
+// ========== 西南联大任务：胜负检测 ==========
+
+void Game::checkLiandaMission()
+{
+    if (!liandaMissionActive || !player) return;
+
+    // 胜利：key >= 10
+    if (keyCount >= 10.0f) {
+        liandaMissionActive = false;
+        showLiandaVictory();
+        return;
+    }
+
+    // 失败：时间到
+    if (liandaElapsedFrames >= LIANDA_BGM_DURATION) {
+        liandaMissionActive = false;
+        showLiandaDefeat();
+        return;
+    }
+
+    // 失败：血量归零
+    if (player && player->getHp() <= 0) {
+        liandaMissionActive = false;
+        showLiandaDefeat();
+        return;
+    }
+}
+
+void Game::showLiandaVictory()
+{
+    if (!scene) return;
+    // 停止BGM
+    if (bgmPlayer) bgmPlayer->stop();
+    // 暂停游戏循环
+    if (gameTimer) gameTimer->stop();
+
+    // 金色闪光全屏效果
+    QGraphicsRectItem *flash = new QGraphicsRectItem(scene->sceneRect());
+    flash->setBrush(QBrush(QColor(255, 215, 0, 200)));
+    flash->setPen(Qt::NoPen);
+    flash->setZValue(10000001);
+    scene->addItem(flash);
+
+    // 胜利文字
+    auto *victoryText = new QGraphicsSimpleTextItem("成功！你拯救了中国，跨过了这个时代！");
+    victoryText->setBrush(QBrush(QColor(255, 255, 0)));
+    QFont f;
+    f.setPointSize(28);
+    f.setBold(true);
+    victoryText->setFont(f);
+    QRectF vr = mapToScene(viewport()->rect()).boundingRect();
+    victoryText->setPos(vr.center().x() - victoryText->boundingRect().width()/2,
+                        vr.center().y() - victoryText->boundingRect().height()/2);
+    victoryText->setZValue(10000002);
+    scene->addItem(victoryText);
+
+    qDebug() << "[Lianda] VICTORY! Keys:" << keyCount;
+
+    // 2秒后跳转主地图
+    QTimer::singleShot(2000, this, [this]() {
+        loadMap(":/maps/new_school_map.tmj", true);
+    });
+}
+
+void Game::showLiandaDefeat()
+{
+    if (!scene) return;
+    // 停止BGM
+    if (bgmPlayer) bgmPlayer->stop();
+    // 暂停游戏循环
+    if (gameTimer) gameTimer->stop();
+
+    // 全屏黑色覆盖
+    QGraphicsRectItem *blackScreen = new QGraphicsRectItem(scene->sceneRect());
+    blackScreen->setBrush(QBrush(Qt::black));
+    blackScreen->setPen(Qt::NoPen);
+    blackScreen->setZValue(10000001);
+    scene->addItem(blackScreen);
+
+    // 红色"英勇牺牲"大字
+    auto *defeatText = new QGraphicsSimpleTextItem("你在这场战争中英勇牺牲");
+    defeatText->setBrush(QBrush(QColor(255, 30, 30)));
+    QFont f;
+    f.setPointSize(30);
+    f.setBold(true);
+    defeatText->setFont(f);
+    QRectF vr = mapToScene(viewport()->rect()).boundingRect();
+    defeatText->setPos(vr.center().x() - defeatText->boundingRect().width()/2,
+                       vr.center().y() - 50);
+    defeatText->setZValue(10000002);
+    scene->addItem(defeatText);
+
+    // 副标题
+    auto *subText = new QGraphicsSimpleTextItem("相信你为这场战争做出了极大贡献！");
+    subText->setBrush(QBrush(QColor(200, 180, 150)));
+    QFont sf;
+    sf.setPointSize(16);
+    subText->setFont(sf);
+    subText->setPos(vr.center().x() - subText->boundingRect().width()/2,
+                    vr.center().y() + 20);
+    subText->setZValue(10000002);
+    scene->addItem(subText);
+
+    qDebug() << "[Lianda] DEFEAT! Elapsed:" << liandaElapsedFrames << "HP:" << (player ? player->getHp() : -1);
+
+    // 3秒后跳转主地图
+    QTimer::singleShot(3000, this, [this]() {
+        loadMap(":/maps/new_school_map.tmj", true);
+    });
+}
+
 // ========== 音频系统 ==========
 
 void Game::playRandomBgm()
 {
-    if (bgmPlaylist.isEmpty()) return;
     if (!bgmPlayer) {
         bgmPlayer = new QMediaPlayer(this);
         QAudioOutput *audioOut = new QAudioOutput(this);
         audioOut->setVolume(0.45);
         bgmPlayer->setAudioOutput(audioOut);
     }
-    int idx = 0;
-    if (bgmPlaylist.size() > 1) {
-        do {
-            idx = QRandomGenerator::global()->bounded(bgmPlaylist.size());
-        } while (bgmPlayer->source().toString() == bgmPlaylist[idx]);
+    // 西南联大地图：等玩家点击"开始探索"后才播放BGM
+    QString bgmPath;
+    if (currentMapPath.contains("lianda")) {
+        if (!liandaMissionStarted) return;  // 还没开始，先不播
+        bgmPath = "qrc:/bgms/background_BGM.mp3";
+    } else if (bgmPlaylist.isEmpty()) {
+        return;
+    } else {
+        int idx = 0;
+        if (bgmPlaylist.size() > 1) {
+            do {
+                idx = QRandomGenerator::global()->bounded(bgmPlaylist.size());
+            } while (bgmPlayer->source().toString() == bgmPlaylist[idx]);
+        }
+        bgmPath = bgmPlaylist[idx];
     }
-    bgmPlayer->setSource(QUrl(bgmPlaylist[idx]));
+    bgmPlayer->setSource(QUrl(bgmPath));
     bgmPlayer->setLoops(QMediaPlayer::Infinite);
     bgmPlayer->play();
-    qDebug() << "[BGM] Playing (loop)" << bgmPlaylist[idx];
+    qDebug() << "[BGM] Playing (loop)" << bgmPath;
 }
 
 void Game::playSfx(const QString &path, qreal vol)
